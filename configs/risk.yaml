@@ -1,0 +1,29 @@
+# ═══════════════════════════════════════════════════════════════════
+# OTO-BOT Risk Policy Configuration
+# ═══════════════════════════════════════════════════════════════════
+
+# --- Core backtest promotion gates ---
+max_drawdown_limit: -0.15
+min_sharpe: 1.0
+min_profit_factor: 1.1
+single_strategy_daily_loss_cap: 0.02
+portfolio_daily_loss_cap: 0.04
+min_sortino: 0.8
+min_total_trades: 30
+max_correlation: 0.70
+
+# --- Atlas Trading immutable hard risk rules ---
+max_single_trade_risk_pct: 0.02       # Never >2% per trade
+max_daily_loss_pct: 0.05              # 5% daily loss = circuit breaker
+max_weekly_loss_pct: 0.10             # 10% weekly loss limit
+max_monthly_drawdown_pct: 0.15        # 15% monthly drawdown cap
+max_correlated_risk_pct: 0.08         # Correlated positions max 8%
+circuit_breaker_pct: 0.05             # 5% loss triggers circuit breaker
+max_single_position_pct: 0.20         # No single position >20% of capital
+max_total_positions: 8                # Maximum concurrent positions
+max_same_direction: 4                 # Max positions in same direction
+max_leverage: 5.0                     # Maximum allowed leverage
+consec_loss_halve: 3                  # Halve size after 3 consecutive losses
+consec_loss_stop: 5                   # Stop trading after 5 consecutive losses
+funding_rate: 0.0001                  # 0.01% per 8h (crypto perpetuals)
+funding_interval_hours: 8             # Funding interval in hours

@@ -1,0 +1,25 @@
+executive:
+  ceo: Atlas CEO
+  chief_of_staff: Iris ChiefOfStaff
+
+departments:
+  - Market Intelligence
+  - Strategy R&D
+  - Quant Research
+  - Data Engineering
+  - Backtest & Simulation
+  - Execution & Broker Adapters
+  - Risk & Governance
+  - Memory & Knowledge Systems
+  - Performance Analytics
+
+strategy_families:
+  - day
+  - swing
+  - scalp
+
+markets:
+  - crypto
+  - forex
+  - us_equities
+  - bist

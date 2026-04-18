@@ -1,0 +1,102 @@
+[
+  {
+    "name": "Atlas CEO",
+    "role": "CEO",
+    "department": "Executive",
+    "mandate": "Own the lab and manage agents.",
+    "active": true,
+    "agent_id": "01cbcb43-29b1-47c1-80de-0a3d0bdc5852",
+    "created_at": "2026-04-12T16:34:58.914135+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Iris ChiefOfStaff",
+    "role": "Chief of Staff",
+    "department": "Executive",
+    "mandate": "Track execution and dependencies.",
+    "active": true,
+    "agent_id": "350a993a-1f32-4b5c-b385-760b4ceb4503",
+    "created_at": "2026-04-12T16:34:58.914539+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Vega MarketIntel",
+    "role": "Market Intelligence",
+    "department": "Research",
+    "mandate": "Monitor market structure.",
+    "active": true,
+    "agent_id": "bec509a2-7915-4a4a-9338-f0c8b9558836",
+    "created_at": "2026-04-12T16:34:58.915133+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Nova StrategyRND",
+    "role": "Strategy R&D",
+    "department": "Research",
+    "mandate": "Generate hypotheses.",
+    "active": true,
+    "agent_id": "31dc4d97-ea73-4001-9fdf-0873777fc527",
+    "created_at": "2026-04-12T16:34:58.915831+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Sigma Quant",
+    "role": "Quant Research",
+    "department": "Research",
+    "mandate": "Design signals and validations.",
+    "active": true,
+    "agent_id": "55b8c437-771c-407d-ac12-126a5cc003f9",
+    "created_at": "2026-04-12T16:34:58.916286+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Helix Backtest",
+    "role": "Backtest",
+    "department": "Simulation",
+    "mandate": "Run backtests and stress tests.",
+    "active": true,
+    "agent_id": "ea26632a-32f6-447e-ac14-3c882b965746",
+    "created_at": "2026-04-12T16:34:58.916726+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Sentinel Risk",
+    "role": "Risk & Governance",
+    "department": "Governance",
+    "mandate": "Enforce risk gates.",
+    "active": true,
+    "agent_id": "0b12c223-bddb-4a2d-8c83-6f751528a525",
+    "created_at": "2026-04-12T16:34:58.917582+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Archive Memory",
+    "role": "Memory Architect",
+    "department": "Knowledge",
+    "mandate": "Compress and store lessons.",
+    "active": true,
+    "agent_id": "6dddce87-c1f6-4df0-a2db-d516d50afcb5",
+    "created_at": "2026-04-12T16:34:58.918416+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Pulse Analytics",
+    "role": "Performance Analytics",
+    "department": "Analytics",
+    "mandate": "Score experiments.",
+    "active": true,
+    "agent_id": "3833b731-2b53-4394-9238-a203463f4588",
+    "created_at": "2026-04-12T16:34:58.919098+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Forge Execution",
+    "role": "Execution Engineer",
+    "department": "Execution",
+    "mandate": "Own paper/live execution interfaces.",
+    "active": true,
+    "agent_id": "a5314a58-198d-4516-9123-c0fba934954d",
+    "created_at": "2026-04-12T16:34:58.919990+00:00",
+    "metadata": {}
+  }
+]
