@@ -19,6 +19,7 @@ from __future__ import annotations
 import math
 import random
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -177,11 +178,10 @@ class PaperTrader:
         self._daily_pnl: float = 0.0
         self._killed: bool = False
 
-        # Circuit breaker event log
-        self._circuit_breaker_events: list[dict[str, Any]] = []
-
-        # Full trade history (includes rejected)
-        self._trade_history: list[dict[str, Any]] = []
+        # Bounded ring buffers — 24/7 koşumda RAM'ı koruma altına al.
+        # Persistans için closed_trades + ledger otorite; bu listeler operasyonel telemetri.
+        self._circuit_breaker_events: deque[dict[str, Any]] = deque(maxlen=1_000)
+        self._trade_history: deque[dict[str, Any]] = deque(maxlen=10_000)
 
         # Stats accumulators
         self._max_simultaneous_positions: int = 0

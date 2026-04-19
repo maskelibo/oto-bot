@@ -237,8 +237,12 @@ def download(
     df: Optional[pd.DataFrame] = None
     if market == "crypto":
         df = fetch_crypto_historical(symbol, timeframe, years=years)
-    elif market in ("us_equities", "bist"):
+    elif market == "us_equities":
         df = fetch_stock_historical(symbol, timeframe, years=years)
+    elif market == "bist":
+        # BIST sembolleri Yahoo'da .IS suffix'i ile listelenir (THYAO → THYAO.IS)
+        yahoo_sym = symbol if symbol.endswith(".IS") else f"{symbol}.IS"
+        df = fetch_stock_historical(yahoo_sym, timeframe, years=years)
     elif market == "forex":
         df = fetch_forex_historical(symbol, timeframe, years=years)
 

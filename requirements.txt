@@ -9,3 +9,4 @@ ccxt>=4.3.0
 yfinance>=0.2.40
 python-dotenv>=1.0.1
 ta>=0.11.0
+optuna>=3.0

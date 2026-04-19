@@ -45,6 +45,7 @@ from oto_bot.agents.robustness import RobustnessQueue, generate_variants
 from oto_bot.agents.proposals import Proposal, ProposalQueue
 from oto_bot.agents.git_research import HermesGitResearcher
 from oto_bot.agents.curriculum import TalosCurriculumLoader
+from oto_bot.agents.educator_loop import EducatorLoop
 from oto_bot.agents.settings import load_settings, save_settings, AppSettings
 from oto_bot.agents.auto_approver import AutoApprover
 from dataclasses import asdict
@@ -813,6 +814,76 @@ async def api_curriculum_borsaninizinden(use_llm: bool = False):
     return talos.ingest_borsaninizinden()
 
 
+# ---------------------------------------------------------------------------
+# Faz 7 — Eğitim daemon (Talos + Hermes daimi mode) status endpoint
+# ---------------------------------------------------------------------------
+
+# Webui process'i içinde global bir EducatorLoop tutmuyoruz — orchestrator
+# kendi process'inde ayrıca bir tane çalıştırıyor (ana laboratuvar). Webui
+# kullanıcıya artifacts üzerinden okunabilir state'i ve kendi opsiyonel
+# read-only örneğini sunar.
+
+_educator_singleton: EducatorLoop | None = None
+
+
+def _get_or_create_webui_educator() -> EducatorLoop:
+    """Webui için tembelce yaratılan, başlatılmamış educator örneği.
+
+    Sadece status hesaplaması için lesson sayıları ve recent preview üretmek
+    üzere kullanılır. Webui process'i ayrı bir thread başlatmaz; arka plan
+    eğitim daemon'u orchestrator process'inde koşar.
+    """
+    global _educator_singleton
+    if _educator_singleton is None:
+        _educator_singleton = EducatorLoop()
+    return _educator_singleton
+
+
+@app.get("/api/educator/status")
+async def api_educator_status() -> dict[str, Any]:
+    """Talos + Hermes daimi loop telemetrisi.
+
+    İçerik:
+        - thread alive flag'leri (orchestrator çalışıyorsa True)
+        - son ingest / discover zamanı
+        - toplam ders / proposal sayısı (her ajan için)
+        - son 5 ders preview
+        - curriculum_state.json + git_research_state.json snapshot
+    """
+    payload: dict[str, Any] = {}
+    try:
+        edu = _get_or_create_webui_educator()
+        payload.update(edu.status())
+    except Exception as exc:
+        payload["status_error"] = f"{type(exc).__name__}: {exc}"
+
+    # Orchestrator heartbeat içindeki educator alanı (gerçek thread state)
+    try:
+        hb_path = ROOT / "artifacts" / "current_cycle.json"
+        if hb_path.exists():
+            hb = json.loads(hb_path.read_text(encoding="utf-8"))
+            if "educator" in hb:
+                payload["orchestrator_educator"] = hb["educator"]
+    except Exception:
+        pass
+
+    # State file snapshots
+    try:
+        cstate = ROOT / "artifacts" / "curriculum_state.json"
+        if cstate.exists():
+            payload["curriculum_state"] = json.loads(cstate.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    try:
+        gstate = ROOT / "artifacts" / "git_research_state.json"
+        if gstate.exists():
+            payload["git_research_state"] = json.loads(gstate.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+    return payload
+
+
 @app.get("/api/settings")
 async def api_settings_get():
     s = load_settings()
@@ -1147,16 +1218,72 @@ async def api_bots_prune(
 
 @app.get("/api/bots")
 async def api_bots(start_capital: float = 10_000, limit: int = 2000):
-    """Her bot için aggregate: bot_id → name, run sayısı, avg metrikler, horizon breakdown."""
-    con = _conn()
-    if con is None:
-        return []
-    rows = con.execute(
-        "SELECT * FROM experiments ORDER BY timestamp DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
+    """FAZ 6 sonrası: bot listesi `bot_registry.json`'dan gelir (5 sabit slot)."""
+    try:
+        return await _api_bots_impl(start_capital, limit)
+    except Exception as exc:
+        import traceback, logging
+        logging.getLogger("webui").error(f"api_bots crashed: {exc}\n{traceback.format_exc()}")
+        return {"error": str(exc), "traceback": traceback.format_exc().splitlines()[-5:]}
 
+
+async def _api_bots_impl(start_capital: float = 10_000, limit: int = 2000):
+    """Asıl bot aggregation — exception fırlatabilir, üst katman yakalar."""
+    # Önce sabit 5 slot'u registry'den oku (5 bot her zaman var).
+    slots = []
+    import sys, logging
+    from pathlib import Path
+    src_dir = str(Path(__file__).resolve().parent.parent / "src")
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    log = logging.getLogger("webui.bots")
+    log.warning(f"bots: src_dir={src_dir} in sys.path={src_dir in sys.path}")
+    try:
+        from oto_bot.agents.bot_registry import BotRegistry
+        log.warning("bots: BotRegistry import OK")
+    except Exception as exc:
+        import traceback
+        log.error(f"bots: BotRegistry import FAILED: {exc}\n{traceback.format_exc()}")
+    try:
+        registry = BotRegistry()
+        slots = registry.all_slots()
+        log.warning(f"bots: registry loaded slots={len(slots)}")
+    except Exception as exc:
+        import traceback
+        log.error(f"bots: registry init/load FAILED: {exc}\n{traceback.format_exc()}")
+
+    # Slot iteration cycle'larını topla (per-slot run history)
+    con = _conn()
+    rows = []
+    if con is not None:
+        rows = con.execute(
+            "SELECT * FROM experiments WHERE category='slot_iteration' ORDER BY timestamp DESC LIMIT ?",
+            (max(limit, 5000),),
+        ).fetchall()
+
+    # 5 slot'u her zaman bot listesine ekle (registry otorite, run history opsiyonel).
     bots: dict[str, dict[str, Any]] = {}
+    SLOT_TF_DEFAULT = {"day": "1h", "swing": "1d", "scalp": "15m"}
+    SLOT_DURATION_DEFAULT = {"1d": 1250, "1h": 24000, "15m": 60000}
+    for s in slots:
+        sid = s.slot_id
+        bid = f"slot{sid}_{s.strategy_family}_{s.market}"
+        name = f"{s.strategy_family}/{s.market} (slot {sid})"
+        bots[bid] = {
+            "bot_id": bid, "bot_name": name,
+            "strategy_family": s.strategy_family,
+            "strategy_params": s.lifetime_best_params or s.current_params or {},
+            "market": s.market, "slot_id": sid,
+            "lifetime_best_sharpe": s.lifetime_best_sharpe,
+            "lifetime_best_oos_sharpe": s.lifetime_best_oos_sharpe,
+            "iterations": s.iterations,
+            "accepted_updates": s.accepted_updates,
+            "data_window_start": s.data_window_start,
+            "status": s.status,
+            "runs": [], "symbols_seen": set(), "timeframes_seen": set(),
+        }
+
+    # Run iteration kayıtlarını mevcut slot bot dict'lerine ekle (yeni dict tanımı YOK).
     for r in rows:
         try:
             d = json.loads(r["data"]) if isinstance(r["data"], str) else r["data"]
@@ -1165,14 +1292,19 @@ async def api_bots(start_capital: float = 10_000, limit: int = 2000):
             continue
         family = inner.get("strategy_family") or d.get("strategy") or "unknown"
         params = inner.get("strategy_params") or d.get("params") or {}
-        bid = _bot_fingerprint(family, params)
-        name = _bot_name(family, params)
-
-        b = bots.setdefault(bid, {
-            "bot_id": bid, "bot_name": name,
-            "strategy_family": family, "strategy_params": params,
-            "runs": [], "symbols_seen": set(), "timeframes_seen": set(),
-        })
+        # FAZ 6 — slot bazlı bot. Bir slot = bir bot kişiliği. Params her cycle değişir
+        # (Bayesian arıyor) ama bot kimliği = (family, market, slot_id).
+        slot_id = inner.get("slot_id") or d.get("slot_id")
+        market = inner.get("market") or d.get("market") or "unknown"
+        if slot_id is not None:
+            bid = f"slot{slot_id}_{family}_{market}"
+        else:
+            bid = _bot_fingerprint(family, params)
+        # FAZ 6: registry'deki 5 slot otorite. Eski seed'den (scalp/forex, day/us_eq)
+        # gelen ghost kayıtlar atılır — bot listesinde yer kaplamasın.
+        if bid not in bots:
+            continue
+        b = bots[bid]
         b["runs"].append({
             "timestamp": r["timestamp"],
             "symbol": inner.get("symbol") or d.get("symbol") or "",
@@ -1193,28 +1325,45 @@ async def api_bots(start_capital: float = 10_000, limit: int = 2000):
             b["timeframes_seen"].add(inner["bar_timeframe"])
 
     out = []
+    import logging as _lg2
+    _lg2.getLogger("webui.bots").warning(f"bots: entering loop with bots dict len={len(bots)}")
     for bid, b in bots.items():
+        _lg2.getLogger("webui.bots").warning(f"bots: processing {bid} runs={len(b.get('runs',[]))}")
         runs = b["runs"]
         n = len(runs)
+        # FAZ 6: registry'den gelen slot'lar runs=0 olsa bile bot olarak kalır.
         if n == 0:
-            continue
-        avg_sharpe = sum(r.get("sharpe") or 0 for r in runs) / n
-        avg_roi = sum(r.get("roi") or 0 for r in runs) / n
-        avg_cagr = sum(r.get("cagr") or 0 for r in runs) / n
-        best_sharpe = max((r.get("sharpe") or 0) for r in runs)
-        worst_dd = min((r.get("max_drawdown") or 0) for r in runs)
-        promoted_ct = sum(1 for r in runs if r.get("promoted"))
+            avg_sharpe = b.get("lifetime_best_sharpe", 0.0)
+            avg_roi = 0.0
+            avg_cagr = 0.0
+            best_sharpe = b.get("lifetime_best_sharpe", 0.0)
+            worst_dd = 0.0
+            promoted_ct = 0
+        else:
+            avg_sharpe = sum(r.get("sharpe") or 0 for r in runs) / n
+            avg_roi = sum(r.get("roi") or 0 for r in runs) / n
+            avg_cagr = sum(r.get("cagr") or 0 for r in runs) / n
+            best_sharpe = max((r.get("sharpe") or 0) for r in runs)
+            worst_dd = min((r.get("max_drawdown") or 0) for r in runs)
+            promoted_ct = sum(1 for r in runs if r.get("promoted"))
 
         # Horizon breakdown — her run'ın süresini ay cinsinden hesapla
         tf_to_min = {"1m":1,"5m":5,"15m":15,"30m":30,"1h":60,"4h":240,"1d":1440}
+        # FAZ 6: slot family'sinden default TF (run'da boş gelirse)
+        slot_tf_default = SLOT_TF_DEFAULT.get(b.get("strategy_family"), "1d")
         longest_run_months = 0.0
         for r in runs:
             bars = int(r.get("duration_bars") or 0)
-            tf = r.get("timeframe") or "1h"
-            mins = tf_to_min.get(tf, 60)
+            tf = r.get("timeframe") or slot_tf_default
+            mins = tf_to_min.get(tf, 1440)
             months = (bars * mins) / (60 * 24 * 30)
             if months > longest_run_months:
                 longest_run_months = months
+        # Run yoksa registry slot'undan tahmin et (slot 5 yıl pencere ile koşar).
+        if longest_run_months == 0 and n == 0:
+            est_bars = SLOT_DURATION_DEFAULT.get(slot_tf_default, 1250)
+            est_min = tf_to_min.get(slot_tf_default, 1440)
+            longest_run_months = (est_bars * est_min) / (60 * 24 * 30)
 
         # Horizon buckets
         buckets = {"1yr": [], "2yr": [], "3yr": [], "4yr": [], "5yr": [], "<1yr": []}
@@ -1304,7 +1453,23 @@ async def api_bots(start_capital: float = 10_000, limit: int = 2000):
 
     # Sort by avg_sharpe descending
     out.sort(key=lambda x: x.get("avg_sharpe", 0), reverse=True)
-    return out
+    import logging as _lg
+    _lg.getLogger("webui.bots").warning(f"bots: final out len={len(out)} from bots dict len={len(bots)}")
+    # JSON-safe: numpy/set/dataclass tipleri primitive'e çevir.
+    # FastAPI default jsonable_encoder set/numpy ile sessiz fail oluyor — manuel Response.
+    import json as _json
+    from fastapi.responses import Response as _FastResp
+    def _safe(o):
+        if isinstance(o, (set, frozenset)): return list(o)
+        if hasattr(o, 'item'): return o.item()  # numpy scalars
+        return str(o)
+    try:
+        body = _json.dumps(out, default=_safe, ensure_ascii=False)
+        return _FastResp(content=body, media_type="application/json")
+    except Exception as exc:
+        import traceback
+        _lg.getLogger("webui.bots").error(f"bots: JSON encode failed: {exc}\n{traceback.format_exc()}")
+        return _FastResp(content="[]", media_type="application/json")
 
 
 @app.get("/api/bot/{bot_id}/horizon/{horizon}")
@@ -1914,9 +2079,9 @@ async def api_lessons(
 async def api_lessons_stats():
     """Ders istatistikleri — total / referenced / CEO-approved / per-severity / per-regime."""
     journal = LearningJournal()
-    # Pull up to 2000 recent lessons for aggregation
-    all_lessons = journal.query(limit=2000)
-    total = len(all_lessons)
+    # Toplam SQL COUNT'tan; agregasyon için son 50k ders (perf cap).
+    total = journal.count()
+    all_lessons = journal.query(limit=50_000)
 
     # "CEO-approved" proxy: times_referenced >= 3 (a lesson consulted multiple times
     # during hypothesis generation is de facto endorsed by the agent network).

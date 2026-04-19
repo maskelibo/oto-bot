@@ -77,16 +77,33 @@ class RobustnessQueue:
 
     def next_pending(self) -> RobustnessTest | None:
         """Dequeue en eski test'i (FIFO). Queue boşsa None."""
+        batch = self.next_pending_batch(1)
+        return batch[0] if batch else None
+
+    def next_pending_batch(self, n: int) -> list[RobustnessTest]:
+        """Dequeue en eski N test'i (FIFO). Tek dosya yazımı = O(N) yerine O(file_size)."""
+        if n <= 0:
+            return []
         lines = self.path.read_text(encoding="utf-8").splitlines()
         pending = [l for l in lines if l.strip()]
         if not pending:
-            return None
+            return []
 
-        first = json.loads(pending[0])
-        remaining = pending[1:]
-        # Rewrite file with remaining
-        self.path.write_text("\n".join(remaining) + ("\n" if remaining else ""), encoding="utf-8")
-        return RobustnessTest(**first)
+        head = pending[:n]
+        remaining = pending[n:]
+        out: list[RobustnessTest] = []
+        for raw in head:
+            try:
+                out.append(RobustnessTest(**json.loads(raw)))
+            except Exception:
+                continue
+        # Atomic-ish rewrite: tmp dosyaya yaz, sonra os.replace ile değiştir
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        body = "\n".join(remaining) + ("\n" if remaining else "")
+        tmp.write_text(body, encoding="utf-8")
+        import os as _os
+        _os.replace(tmp, self.path)
+        return out
 
     def peek_all(self, limit: int = 500) -> list[dict[str, Any]]:
         lines = self.path.read_text(encoding="utf-8").splitlines()

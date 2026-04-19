@@ -137,7 +137,9 @@
     "active": true,
     "agent_id": "3bc3f8fa-4f2f-4efb-a66d-a83a42358faa",
     "created_at": "2026-04-18T19:22:53.837125+00:00",
-    "metadata": {}
+    "metadata": {
+      "wired_phase": 4
+    }
   },
   {
     "name": "Cassandra PreMortem",
@@ -167,7 +169,9 @@
     "active": true,
     "agent_id": "b080c86f-72fe-4443-ba11-be1cc99a6c46",
     "created_at": "2026-04-18T19:22:53.838124+00:00",
-    "metadata": {}
+    "metadata": {
+      "wired_phase": 4
+    }
   },
   {
     "name": "Ledger Attribution",
@@ -257,6 +261,54 @@
       "scope": "unknown|us_equities",
       "failure_rate": 1.0,
       "sample": 53
+    }
+  },
+  {
+    "name": "Nova-swing-bist",
+    "role": "Strategy R&D Specialist",
+    "department": "Research",
+    "mandate": "Scope: swing / bist. Failure rate 100% over 75 cycles. Focus: izole edilmi\u015f hipotezler, specialized param searches.",
+    "active": false,
+    "agent_id": "2fe93698-b79c-4a74-a6f0-a723ae247e91",
+    "created_at": "2026-04-19T13:28:32.706932+00:00",
+    "metadata": {
+      "hired_at_cycle": 950,
+      "hired_by": "Atlas CEO",
+      "scope": "swing|bist",
+      "failure_rate": 1.0,
+      "sample": 75
+    }
+  },
+  {
+    "name": "Nova-unknown-bist",
+    "role": "Strategy R&D Specialist",
+    "department": "Research",
+    "mandate": "Scope: unknown / bist. Failure rate 100% over 60 cycles. Focus: izole edilmi\u015f hipotezler, specialized param searches.",
+    "active": false,
+    "agent_id": "c9401242-f81b-46c5-8ddc-acabe4d0aee6",
+    "created_at": "2026-04-19T13:31:50.757231+00:00",
+    "metadata": {
+      "hired_at_cycle": 1000,
+      "hired_by": "Atlas CEO",
+      "scope": "unknown|bist",
+      "failure_rate": 1.0,
+      "sample": 60
+    }
+  },
+  {
+    "name": "Nova-day-bist",
+    "role": "Strategy R&D Specialist",
+    "department": "Research",
+    "mandate": "Scope: day / bist. Failure rate 100% over 62 cycles. Focus: izole edilmi\u015f hipotezler, specialized param searches.",
+    "active": false,
+    "agent_id": "7604c2dd-1b4b-4a90-966b-519211b213f6",
+    "created_at": "2026-04-19T13:45:16.009459+00:00",
+    "metadata": {
+      "hired_at_cycle": 1200,
+      "hired_by": "Atlas CEO",
+      "scope": "day|bist",
+      "failure_rate": 1.0,
+      "sample": 62
     }
   }
 ]

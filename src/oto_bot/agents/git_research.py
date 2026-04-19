@@ -14,6 +14,13 @@ Akış:
     5. llm_enhanced (opsiyonel): Claude ile semantic extract
     6. Her bulgudan bir `Proposal` üret → queue'ya submit
 
+Faz 7 — daimi mode:
+    EducatorLoop her tetiklemede ``discover_loop_step()`` çağırır. Sınıf,
+    ``LOOP_QUERIES`` üzerinde rotasyon yapar — state file
+    ``artifacts/git_research_state.json`` hangi query / repo işlendiğini
+    saklar. Her step: 1 query × top-5 repo × en değerli 3 finding → lesson
+    + proposal. Aynı repo tekrar tekrar incelenmez.
+
 GitHub unauth API rate limit: 60 request/saat. Yeterli.
 """
 
@@ -24,12 +31,68 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import requests
 
 from oto_bot.agents.proposals import Proposal, ProposalQueue
+from oto_bot.core.models import Lesson
+from oto_bot.memory.journal import LearningJournal
+
+
+# State file: hangi query çalıştırıldı, hangi repo işlendi
+_STATE_PATH = Path("artifacts/git_research_state.json")
+
+
+def _load_state() -> dict[str, Any]:
+    try:
+        if _STATE_PATH.exists():
+            return json.loads(_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_state(state: dict[str, Any]) -> None:
+    """State'i atomik olarak diske yaz."""
+    try:
+        _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _STATE_PATH.with_suffix(_STATE_PATH.suffix + ".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, _STATE_PATH)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Loop query rotasyonu — daimi mode
+# ---------------------------------------------------------------------------
+
+LOOP_QUERIES: list[str] = [
+    "trading bot python mean reversion",
+    "algorithmic trading strategy crypto",
+    "forex price action python",
+    "swing trading indicators backtest",
+    "machine learning trading github",
+    "quantitative trading library python",
+    "high frequency trading python",
+    "momentum strategy backtest python",
+    "options trading python",
+    "portfolio optimization python",
+    "reinforcement learning trading",
+    "binance trading bot python",
+    "metatrader python strategy",
+    "factor investing python",
+    "statistical arbitrage python",
+    "market making bot python",
+    "trading signals python neural network",
+    "risk management trading python",
+    "vectorbt strategy",
+    "backtrader strategy python",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -95,10 +158,13 @@ class HermesGitResearcher:
     def __init__(
         self,
         queue: ProposalQueue | None = None,
+        journal: LearningJournal | None = None,
         use_llm: bool = False,
         user_agent: str = "oto-bot-hermes-git-researcher",
     ) -> None:
         self.queue = queue or ProposalQueue()
+        # journal opsiyonel — daimi mode'da finding'ler lesson olarak da yazılır.
+        self.journal = journal or LearningJournal()
         self.use_llm = use_llm
         self.headers = {"Accept": "application/vnd.github+json", "User-Agent": user_agent}
         token = os.environ.get("GITHUB_TOKEN")
@@ -304,3 +370,197 @@ README:
             "proposals_created": proposals_created,
             "use_llm": self.use_llm,
         }
+
+    # ------------------------------------------------------------------
+    # Faz 7 — Daimi mode: rotated single-query step
+    # ------------------------------------------------------------------
+
+    def _emit_finding_lesson(
+        self,
+        repo: RepoCard,
+        insight: dict[str, str],
+        query: str,
+    ) -> str | None:
+        """README finding'ini journal'a kompakt bir lesson olarak yaz."""
+        try:
+            content = (
+                f"[{repo.full_name} ⭐{repo.stars}] {insight['benefit']} — "
+                f"Uygulama: {insight['action']}"
+            )[:600]
+            lesson = Lesson(
+                lesson_id="",
+                author_agent="Hermes GitResearcher",
+                content=content,
+                tags=[
+                    "source:git_research",
+                    f"source_domain:github.com",
+                    f"repo:{repo.full_name}",
+                    f"query:{query[:60]}",
+                ],
+                market="*",
+                strategy_family="*",
+                regime="*",
+                symbol="*",
+                severity="info",
+                evidence_experiment_id=None,
+                source_cycle=0,
+            )
+            return self.journal.save(lesson)
+        except Exception:
+            return None
+
+    def discover_loop_step(
+        self,
+        max_repos: int = 5,
+        max_findings_per_repo: int = 3,
+    ) -> dict[str, Any]:
+        """Tek bir query rotasyonu — EducatorLoop her tetiklemede bunu çağırır.
+
+        State: artifacts/git_research_state.json
+            {"cursor": int, "processed_repos": {full_name: ts_iso, ...},
+             "history": [...]}.
+        Aynı repo daha önce işlendiyse skip (yeni README değişikliği için
+        cooldown 30 gün — pratikte loop bu süreden önce repo listesini
+        bitirip dönmez).
+        """
+        state = _load_state()
+        cursor = int(state.get("cursor", 0)) % max(len(LOOP_QUERIES), 1)
+        processed: dict[str, str] = state.setdefault("processed_repos", {})
+        history: list[dict[str, Any]] = state.setdefault("history", [])
+
+        query = LOOP_QUERIES[cursor]
+        started_at = datetime.now(timezone.utc).isoformat()
+        repos_seen = 0
+        repos_skipped = 0
+        proposals_created = 0
+        lessons_created = 0
+        sample: list[dict[str, Any]] = []
+        error: str | None = None
+
+        try:
+            repos = self.search_repos(query, per_page=max_repos)
+        except Exception as exc:  # noqa: BLE001
+            repos = []
+            error = f"search_failed: {type(exc).__name__}: {exc}"
+
+        for repo in repos[:max_repos]:
+            if not repo.full_name:
+                continue
+            repos_seen += 1
+            if repo.full_name in processed:
+                repos_skipped += 1
+                continue
+            try:
+                readme = self.fetch_readme(repo.full_name)
+            except Exception:
+                readme = ""
+            if not readme or len(readme) < 200:
+                processed[repo.full_name] = datetime.now(timezone.utc).isoformat()
+                continue
+            insights = self.extract_insights_rule_based(readme)
+            if self.use_llm:
+                try:
+                    insights.extend(self.extract_insights_llm(readme, repo.full_name))
+                except Exception:
+                    pass
+
+            for insight in insights[:max_findings_per_repo]:
+                # Lesson kaydı
+                lid = self._emit_finding_lesson(repo, insight, query)
+                if lid:
+                    lessons_created += 1
+                # Proposal kaydı
+                try:
+                    proposal = Proposal(
+                        proposal_id="",
+                        proposal_type="integration",
+                        title=f"{insight['benefit']} — {repo.full_name}"[:200],
+                        author_agent="Hermes GitResearcher",
+                        summary=(
+                            f"Star {repo.stars:,} · {repo.description[:200]}\n"
+                            f"Fayda: {insight['benefit']}\n"
+                            f"Uygulama: {insight['action']}"
+                        ),
+                        detail_markdown=(
+                            f"## {repo.full_name} ({repo.stars:,} stars)\n\n"
+                            f"**Query**: {query}\n\n"
+                            f"**URL**: {repo.url}\n\n"
+                            f"### Fayda\n{insight['benefit']}\n\n"
+                            f"### Uygulama\n{insight['action']}\n\n"
+                            f"### Kanıt\n> {insight['evidence']}\n"
+                        ),
+                        estimated_benefit=insight["benefit"],
+                        estimated_risk="IP/lisans kontrol; entegrasyon iş gücü; overfitting riski.",
+                        action_steps=[
+                            f"Repo incele: {repo.url}",
+                            insight["action"],
+                            "Cassandra pre-mortem",
+                        ],
+                        source_url=repo.url,
+                        metadata={
+                            "repo": repo.full_name,
+                            "stars": repo.stars,
+                            "language": repo.language,
+                            "topics": repo.topics,
+                            "loop_query": query,
+                        },
+                    )
+                    self.queue.submit(proposal)
+                    proposals_created += 1
+                except Exception:
+                    pass
+
+                if len(sample) < 5:
+                    sample.append({
+                        "repo": repo.full_name,
+                        "stars": repo.stars,
+                        "benefit": insight["benefit"],
+                    })
+            processed[repo.full_name] = datetime.now(timezone.utc).isoformat()
+
+        # Cursor ilerlet (bir sonraki tetiklemede yeni query)
+        state["cursor"] = (cursor + 1) % len(LOOP_QUERIES)
+        state["last_query"] = query
+        state["last_run"] = datetime.now(timezone.utc).isoformat()
+        state["processed_repos"] = processed
+        history.append({
+            "ts": started_at,
+            "query": query,
+            "repos_seen": repos_seen,
+            "repos_skipped": repos_skipped,
+            "proposals_created": proposals_created,
+            "lessons_created": lessons_created,
+            "error": error,
+        })
+        # Son 50 step'i tut — state dosyası şişmesin
+        state["history"] = history[-50:]
+        _save_state(state)
+
+        return {
+            "query": query,
+            "cursor_next": state["cursor"],
+            "repos_seen": repos_seen,
+            "repos_skipped": repos_skipped,
+            "proposals_created": proposals_created,
+            "lessons_created": lessons_created,
+            "sample": sample,
+            "error": error,
+            "started_at": started_at,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Faz 7 — task brief'te kullanılan alternatif isim.
+    def search_github(self, query: str, max_repos: int = 5) -> list[RepoCard]:
+        """Tek bir query çalıştır — alias of search_repos."""
+        return self.search_repos(query, per_page=max_repos)
+
+
+# Faz 7 — kısa alias (EducatorLoop ve smoke testler için).
+GitResearcher = HermesGitResearcher
+
+__all__ = [
+    "GitResearcher",
+    "HermesGitResearcher",
+    "LOOP_QUERIES",
+    "RepoCard",
+]

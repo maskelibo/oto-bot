@@ -67,10 +67,47 @@ class LearningJournal:
     # ------------------------------------------------------------------
 
     def save(self, lesson: Lesson) -> str:
-        """Bir dersi yaz — dedupe etmez, tekrar edilmiş ama yeni cycle'dan
-        gelen dersler de ayrı tutulur (trend izleme için)."""
+        """Bir dersi yaz. Dedupe: aynı (content, market, strategy_family, regime, symbol)
+        kayıt varsa yeni satır eklemek yerine mevcut satırın times_referenced'ı +1,
+        source_cycle MAX olarak güncellenir. Token ekonomisi + retriever sinyal kalitesi.
+        Trend izleme `source_cycle`'ın güncellenmesi ile sağlanır.
+        """
         if not lesson.lesson_id:
             lesson.lesson_id = str(uuid.uuid4())
+        ts = lesson.created_at.isoformat() if isinstance(lesson.created_at, datetime) else lesson.created_at
+
+        # Dedupe lookup — aynı semantik anahtar var mı?
+        existing = self._conn.execute(
+            """
+            SELECT id, source_cycle FROM lessons
+            WHERE content = ? AND market = ? AND strategy_family = ?
+              AND regime = ? AND symbol = ?
+            LIMIT 1
+            """,
+            (
+                lesson.content,
+                lesson.market,
+                lesson.strategy_family,
+                lesson.regime,
+                lesson.symbol,
+            ),
+        ).fetchone()
+
+        if existing is not None:
+            new_cycle = max(int(existing["source_cycle"] or 0), int(lesson.source_cycle or 0))
+            self._conn.execute(
+                """
+                UPDATE lessons
+                SET times_referenced = times_referenced + 1,
+                    source_cycle = ?,
+                    timestamp = ?
+                WHERE id = ?
+                """,
+                (new_cycle, ts, existing["id"]),
+            )
+            self._conn.commit()
+            return existing["id"]
+
         self._conn.execute(
             """
             INSERT OR REPLACE INTO lessons (
@@ -81,7 +118,7 @@ class LearningJournal:
             """,
             (
                 lesson.lesson_id,
-                lesson.created_at.isoformat() if isinstance(lesson.created_at, datetime) else lesson.created_at,
+                ts,
                 lesson.author_agent,
                 lesson.content,
                 json.dumps(lesson.tags, ensure_ascii=False),
@@ -94,6 +131,11 @@ class LearningJournal:
                 lesson.source_cycle,
                 lesson.times_referenced,
             ),
+        )
+        # Dedupe için kompozit index — sonraki SELECT'leri hızlandırır.
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lessons_dedupe "
+            "ON lessons(content, market, strategy_family, regime, symbol)"
         )
         self._conn.commit()
         return lesson.lesson_id

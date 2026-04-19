@@ -17,13 +17,22 @@ motoru bir callable ister (run_backtest_fn). Böylece çift bağımlılık olmaz
 
 from __future__ import annotations
 
+import logging
+import pickle
 import uuid
+from concurrent.futures import (
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from dataclasses import asdict
 from typing import Any, Callable
 
 import pandas as pd
 
 from oto_bot.core.models import StressResult, StressScenario
+
+logger = logging.getLogger("oto_bot.stress")
 
 
 # ---------------------------------------------------------------------------
@@ -219,22 +228,112 @@ class StressLab:
         strategy_family: str,
         market: str,
         run_backtest_fn: Callable[[pd.DataFrame], dict[str, Any]],
+        max_workers: int = 4,
     ) -> list[StressResult]:
-        results: list[StressResult] = []
-        for sid in self.scenarios:
-            try:
-                results.append(self.run(sid, base_df, strategy_family, market, run_backtest_fn))
-            except Exception as exc:  # noqa: BLE001
-                results.append(
-                    StressResult(
-                        scenario_id=sid,
-                        strategy_family=strategy_family,
-                        market=market,
-                        survived=False,
-                        max_drawdown_under_stress=0.0,
-                        pnl_under_stress=0.0,
-                        kill_switch_fired=True,
-                        notes=f"ERROR: {exc}",
-                    )
-                )
-        return results
+        """Tüm 6 senaryoyu paralel koş.
+
+        Faz 3 — Önce ProcessPool dene (CPU-bound backtest); `run_backtest_fn`
+        veya çağrı argümanları picklable değilse (closure, lokal sınıf, vb.)
+        otomatik olarak ThreadPool'a düş. Sonuçlar deterministik sırada
+        (kütüphanedeki scenario_id sırası) toplanır.
+        """
+        sids = list(self.scenarios.keys())
+        executor_kind = self._select_executor(run_backtest_fn, base_df)
+
+        results_by_sid: dict[str, StressResult] = {}
+
+        ExecutorCls: type
+        if executor_kind == "process":
+            ExecutorCls = ProcessPoolExecutor
+        else:
+            ExecutorCls = ThreadPoolExecutor
+
+        try:
+            with ExecutorCls(max_workers=max_workers) as ex:
+                futures = {
+                    ex.submit(
+                        self.run, sid, base_df, strategy_family, market, run_backtest_fn
+                    ): sid
+                    for sid in sids
+                }
+                for fut in as_completed(futures):
+                    sid = futures[fut]
+                    try:
+                        results_by_sid[sid] = fut.result()
+                    except Exception as exc:  # noqa: BLE001
+                        results_by_sid[sid] = StressResult(
+                            scenario_id=sid,
+                            strategy_family=strategy_family,
+                            market=market,
+                            survived=False,
+                            max_drawdown_under_stress=0.0,
+                            pnl_under_stress=0.0,
+                            kill_switch_fired=True,
+                            notes=f"ERROR: {exc}",
+                        )
+        except (TypeError, pickle.PicklingError) as exc:
+            # ProcessPool pickle hatası: ThreadPool fallback.
+            logger.warning(
+                f"stress ProcessPool pickling failed ({exc}); falling back to ThreadPool"
+            )
+            results_by_sid.clear()
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futures = {
+                    ex.submit(
+                        self.run, sid, base_df, strategy_family, market, run_backtest_fn
+                    ): sid
+                    for sid in sids
+                }
+                for fut in as_completed(futures):
+                    sid = futures[fut]
+                    try:
+                        results_by_sid[sid] = fut.result()
+                    except Exception as exc2:  # noqa: BLE001
+                        results_by_sid[sid] = StressResult(
+                            scenario_id=sid,
+                            strategy_family=strategy_family,
+                            market=market,
+                            survived=False,
+                            max_drawdown_under_stress=0.0,
+                            pnl_under_stress=0.0,
+                            kill_switch_fired=True,
+                            notes=f"ERROR: {exc2}",
+                        )
+
+        return [results_by_sid[s] for s in sids if s in results_by_sid]
+
+    @staticmethod
+    def _select_executor(
+        run_backtest_fn: Callable[[pd.DataFrame], dict[str, Any]],
+        base_df: pd.DataFrame,
+    ) -> str:
+        """`run_backtest_fn` ve veri picklable mı? evet → process; hayır → thread.
+
+        Picklability'nin sadece dump değil, aynı zamanda subprocess'te
+        çözülebilir (importable) olması gerekir. Closure'lar, lambda'lar veya
+        lokal fonksiyonlar `pickle.dumps()`'a izin verse bile worker
+        process'inde `__main__` üzerinden bulunamaz → thread'e düşeriz.
+        Orchestrator'daki `_stress_bt` tipik olarak böyle bir closure'dur.
+        """
+        # 1. Lambda / lokal fonksiyon / kapanış (closure) tespiti
+        qualname = getattr(run_backtest_fn, "__qualname__", "")
+        if "<lambda>" in qualname or "<locals>" in qualname:
+            return "thread"
+        # Bound method ise __func__ varsa onu da kontrol et
+        underlying = getattr(run_backtest_fn, "__func__", None)
+        if underlying is not None:
+            uq = getattr(underlying, "__qualname__", "")
+            if "<lambda>" in uq or "<locals>" in uq:
+                return "thread"
+        # Free vars'ı olan kapanış mı?
+        closure = getattr(run_backtest_fn, "__closure__", None)
+        if closure:
+            return "thread"
+
+        # 2. Veri picklable mi?
+        try:
+            pickle.dumps(run_backtest_fn)
+            pickle.dumps(base_df)
+            return "process"
+        except Exception:
+            return "thread"

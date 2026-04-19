@@ -19,10 +19,14 @@ tehlike flag'lerine göre ağırlıklı karar verir.
 
 from __future__ import annotations
 
+import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, TYPE_CHECKING
+
+logger = logging.getLogger("oto_bot.debate")
 
 if TYPE_CHECKING:
     from oto_bot.memory.manager import MemoryManager
@@ -334,13 +338,34 @@ class AgentDebater:
         context = context or {}
         participants = participants or _DEFAULT_PARTICIPANTS
 
-        arguments: list[dict[str, Any]] = []
-        for name in participants:
-            if name == "Atlas CEO":
-                continue
-            func = _PERSPECTIVE_FUNCS.get(name)
-            if func:
-                arguments.append(func(experiment_result, context))
+        # Faz 3 — perspektifleri paralel çalıştır (her biri pure fonksiyon,
+        # GIL'i NumPy/pandas okumalarda bırakır → ~4s'den ~1.5s'e iner).
+        active_names: list[str] = [
+            n for n in participants
+            if n != "Atlas CEO" and n in _PERSPECTIVE_FUNCS
+        ]
+        results_by_name: dict[str, dict[str, Any]] = {}
+        if active_names:
+            with ThreadPoolExecutor(
+                max_workers=min(4, len(active_names)),
+                thread_name_prefix="debate-perspective",
+            ) as ex:
+                futures = {
+                    ex.submit(_PERSPECTIVE_FUNCS[name], experiment_result, context): name
+                    for name in active_names
+                }
+                for fut in as_completed(futures):
+                    name = futures[fut]
+                    try:
+                        results_by_name[name] = fut.result()
+                    except Exception as exc:  # noqa: BLE001
+                        # Bir perspektif kırılırsa geri kalanı bozma.
+                        logger.warning(f"perspective '{name}' failed: {exc}")
+
+        # Çıktı sırasını giriş katılımcı sırasıyla hizala (deterministik log).
+        arguments: list[dict[str, Any]] = [
+            results_by_name[n] for n in active_names if n in results_by_name
+        ]
 
         conclusion, severity = _ceo_conclusion(arguments)
 

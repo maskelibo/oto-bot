@@ -1,24 +1,35 @@
 """CurriculumLoader — Türkçe/İngilizce açık kaynak trader derslerini ingest eder.
 
-Kaynaklar (başlangıç):
-    - borsaninizinden.com : Türkçe, İbrahim Babadağı'nın kaleme aldığı teknik analiz + price action dersleri
-    - (opsiyonel) investopedia / babypips : İngilizce
-    - (opsiyonel) PDF trader kitapları
+Kaynaklar:
+    - borsaninizinden.com : Türkçe, İbrahim Babadağı (TA + price action)
+    - babypips.com        : İngilizce, "School of Pipsology" (forex/swing odaklı)
+    - investopedia.com    : İngilizce, kategorize trading makaleleri
+    - litefinance.org     : İngilizce, price action ve beginner içerik
 
 İki mod:
     - rule_based : keyword + pattern extraction → kısa lesson
     - llm_enhanced : Claude CLI → 3 yapılandırılmış insight
 
 Her ders → LearningJournal'a `author:Talos Curriculum` + `source:curriculum:<domain>`
-tag'leriyle yazılır. Nova hipotez üretirken bu dersleri retriever ile çeker
-(memory tarafında source:curriculum match'i ekstra bonus puan alır).
+tag'leriyle yazılır. Nova hipotez üretirken / Bayesian slot iyileştirirken
+retriever bu dersleri context olarak çeker.
+
+Faz 7 — daimi mode:
+    EducatorLoop bu sınıfı arka plan thread'inde belirli aralıklarla
+    tetikler. State file (`artifacts/curriculum_state.json`) hangi URL'in
+    son ne zaman ingest edildiğini tutar; rotated index ile aynı sayfa
+    tekrar tekrar çekilmez. Dedupe LearningJournal.save'de (Faz 5).
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -30,6 +41,31 @@ except ImportError:
 from oto_bot.agents.proposals import Proposal, ProposalQueue
 from oto_bot.core.models import Lesson
 from oto_bot.memory.journal import LearningJournal
+
+
+# State file: hangi URL hangi zamanda işlendi, hangi cursor'dayız
+_STATE_PATH = Path("artifacts/curriculum_state.json")
+
+
+def _load_state() -> dict[str, Any]:
+    """Curriculum state'i diskten yükle (yoksa boş dict)."""
+    try:
+        if _STATE_PATH.exists():
+            return json.loads(_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_state(state: dict[str, Any]) -> None:
+    """State'i atomik olarak diske yaz (os.replace pattern)."""
+    try:
+        _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _STATE_PATH.with_suffix(_STATE_PATH.suffix + ".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, _STATE_PATH)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +88,101 @@ BORSANINIZINDEN_DERSLER: list[tuple[str, str, str]] = [
     ("https://borsaninizinden.com/margin-call-nedir/",               "Margin Call Nedir?",             "risk:margin"),
     ("https://borsaninizinden.com/stop-loss-nedir-nasil-yapilir/",   "Stop Loss Nasıl Yapılır?",       "risk:stop_loss"),
     ("https://borsaninizinden.com/kaldiracli-islem-nedir/",          "Kaldıraçlı İşlem",               "risk:leverage"),
+]
+
+
+# Babypips — School of Pipsology — forex/swing odaklı 100+ ders.
+# Her sayfa müstakil bir lesson. Sıra önemli (giriş -> ileri).
+BABYPIPS_DERSLER: list[tuple[str, str, str]] = [
+    ("https://www.babypips.com/learn/forex/what-is-forex",                  "What Is Forex?",                       "forex:basics"),
+    ("https://www.babypips.com/learn/forex/what-is-traded-in-forex",        "What Is Traded in Forex?",             "forex:pairs"),
+    ("https://www.babypips.com/learn/forex/buying-and-selling-currency-pairs","Buying and Selling Currency Pairs",  "forex:execution"),
+    ("https://www.babypips.com/learn/forex/types-of-forex-orders",          "Types of Forex Orders",                "forex:orders"),
+    ("https://www.babypips.com/learn/forex/how-to-make-money-trading-forex","How to Make Money Trading Forex",      "forex:edge"),
+    ("https://www.babypips.com/learn/forex/three-types-of-analysis",        "Three Types of Analysis",              "analysis:framework"),
+    ("https://www.babypips.com/learn/forex/japanese-candle-sticks",         "Japanese Candlesticks",                "candlestick"),
+    ("https://www.babypips.com/learn/forex/single-candlestick-patterns",    "Single Candlestick Patterns",          "candlestick:single"),
+    ("https://www.babypips.com/learn/forex/dual-candlestick-patterns",      "Dual Candlestick Patterns",            "candlestick:dual"),
+    ("https://www.babypips.com/learn/forex/triple-candlestick-patterns",    "Triple Candlestick Patterns",          "candlestick:triple"),
+    ("https://www.babypips.com/learn/forex/support-and-resistance-levels",  "Support and Resistance Levels",        "price_action:sr"),
+    ("https://www.babypips.com/learn/forex/trend-lines",                    "Trend Lines",                          "price_action:trend"),
+    ("https://www.babypips.com/learn/forex/channels",                       "Channels",                             "price_action:channel"),
+    ("https://www.babypips.com/learn/forex/moving-average",                 "Moving Average",                       "indicator:ma"),
+    ("https://www.babypips.com/learn/forex/bollinger-bands",                "Bollinger Bands",                      "indicator:bb"),
+    ("https://www.babypips.com/learn/forex/macd",                           "MACD",                                 "indicator:macd"),
+    ("https://www.babypips.com/learn/forex/parabolic-sar",                  "Parabolic SAR",                        "indicator:sar"),
+    ("https://www.babypips.com/learn/forex/stochastic",                     "Stochastic",                           "indicator:stoch"),
+    ("https://www.babypips.com/learn/forex/relative-strength-index",        "Relative Strength Index",              "indicator:rsi"),
+    ("https://www.babypips.com/learn/forex/average-directional-index",      "Average Directional Index",            "indicator:adx"),
+    ("https://www.babypips.com/learn/forex/ichimoku-kinko-hyo",             "Ichimoku Kinko Hyo",                   "indicator:ichimoku"),
+    ("https://www.babypips.com/learn/forex/fibonacci",                      "Fibonacci",                            "indicator:fibo"),
+    ("https://www.babypips.com/learn/forex/multiple-time-frame-analysis",   "Multiple Time Frame Analysis",         "mtf:confluence"),
+    ("https://www.babypips.com/learn/forex/elliott-wave-theory",            "Elliott Wave Theory",                  "pattern:elliott"),
+    ("https://www.babypips.com/learn/forex/divergences",                    "Divergences",                          "indicator:divergence"),
+    ("https://www.babypips.com/learn/forex/chart-patterns",                 "Chart Patterns",                       "pattern:chart"),
+    ("https://www.babypips.com/learn/forex/pivot-points",                   "Pivot Points",                         "indicator:pivot"),
+    ("https://www.babypips.com/learn/forex/risk-management",                "Risk Management",                      "risk:basics"),
+    ("https://www.babypips.com/learn/forex/position-sizing",                "Position Sizing",                      "risk:sizing"),
+    ("https://www.babypips.com/learn/forex/breakout-trading",               "Breakout Trading",                     "strategy:breakout"),
+    ("https://www.babypips.com/learn/forex/range-trading",                  "Range Trading",                        "strategy:range"),
+    ("https://www.babypips.com/learn/forex/trend-trading",                  "Trend Trading",                        "strategy:trend"),
+    ("https://www.babypips.com/learn/forex/swing-trading",                  "Swing Trading",                        "strategy:swing"),
+    ("https://www.babypips.com/learn/forex/scalping",                       "Scalping",                             "strategy:scalp"),
+]
+
+
+# Investopedia — kategorize trading makaleleri (kısa, tek-kavram).
+INVESTOPEDIA_DERSLER: list[tuple[str, str, str]] = [
+    ("https://www.investopedia.com/terms/m/movingaverage.asp",      "Moving Average",                  "indicator:ma"),
+    ("https://www.investopedia.com/terms/r/rsi.asp",                "Relative Strength Index",          "indicator:rsi"),
+    ("https://www.investopedia.com/terms/m/macd.asp",               "MACD",                             "indicator:macd"),
+    ("https://www.investopedia.com/terms/b/bollingerbands.asp",     "Bollinger Bands",                  "indicator:bb"),
+    ("https://www.investopedia.com/terms/s/stochasticoscillator.asp","Stochastic Oscillator",           "indicator:stoch"),
+    ("https://www.investopedia.com/terms/a/atr.asp",                "Average True Range",               "indicator:atr"),
+    ("https://www.investopedia.com/terms/v/vwap.asp",               "Volume Weighted Average Price",    "indicator:vwap"),
+    ("https://www.investopedia.com/terms/m/meanreversion.asp",      "Mean Reversion",                   "strategy:mean_reversion"),
+    ("https://www.investopedia.com/terms/m/momentum_investing.asp", "Momentum Investing",               "strategy:momentum"),
+    ("https://www.investopedia.com/terms/d/daytrader.asp",          "Day Trader",                       "strategy:day"),
+    ("https://www.investopedia.com/terms/s/swingtrading.asp",       "Swing Trading",                    "strategy:swing"),
+    ("https://www.investopedia.com/terms/s/scalping.asp",           "Scalping",                         "strategy:scalp"),
+    ("https://www.investopedia.com/terms/s/stop-lossorder.asp",     "Stop-Loss Order",                  "risk:stop_loss"),
+    ("https://www.investopedia.com/terms/p/positionsizing.asp",     "Position Sizing",                  "risk:sizing"),
+    ("https://www.investopedia.com/terms/k/kellycriterion.asp",     "Kelly Criterion",                  "risk:kelly"),
+    ("https://www.investopedia.com/terms/d/drawdown.asp",           "Drawdown",                         "risk:drawdown"),
+    ("https://www.investopedia.com/terms/s/sharperatio.asp",        "Sharpe Ratio",                     "metric:sharpe"),
+    ("https://www.investopedia.com/terms/s/sortinoratio.asp",       "Sortino Ratio",                    "metric:sortino"),
+    ("https://www.investopedia.com/terms/c/candlestick.asp",        "Candlestick",                      "candlestick"),
+    ("https://www.investopedia.com/terms/d/doji.asp",               "Doji",                             "candlestick:doji"),
+    ("https://www.investopedia.com/terms/h/headandshoulderspattern.asp","Head and Shoulders Pattern",   "pattern:head_shoulders"),
+    ("https://www.investopedia.com/terms/d/doubletop.asp",          "Double Top",                       "pattern:double_top"),
+    ("https://www.investopedia.com/terms/c/cupandhandle.asp",       "Cup and Handle",                   "pattern:cup_handle"),
+    ("https://www.investopedia.com/terms/f/fibonaccilines.asp",     "Fibonacci Lines",                  "indicator:fibo"),
+    ("https://www.investopedia.com/terms/p/pivotpoint.asp",         "Pivot Point",                      "indicator:pivot"),
+    ("https://www.investopedia.com/terms/i/ichimoku-cloud.asp",     "Ichimoku Cloud",                   "indicator:ichimoku"),
+    ("https://www.investopedia.com/terms/b/backtesting.asp",        "Backtesting",                      "framework:backtest"),
+    ("https://www.investopedia.com/terms/w/walk-forward-analysis.asp","Walk-Forward Analysis",          "framework:wf"),
+    ("https://www.investopedia.com/terms/m/montecarlosimulation.asp","Monte Carlo Simulation",          "framework:mc"),
+    ("https://www.investopedia.com/terms/o/optimization.asp",       "Optimization",                     "framework:opt"),
+]
+
+
+# LiteFinance — price action / beginner blog.
+LITEFINANCE_DERSLER: list[tuple[str, str, str]] = [
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-strategies/", "Best Forex Strategies",                "strategy:overview"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-strategies/price-action-trading/", "Price Action Trading", "price_action"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-strategies/swing-trading-strategies/", "Swing Trading Strategies", "strategy:swing"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-strategies/scalping-strategy/", "Scalping Strategy",      "strategy:scalp"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-strategies/breakout-trading/", "Breakout Trading",        "strategy:breakout"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-strategies/trend-trading/", "Trend Trading",              "strategy:trend"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-strategies/range-trading/", "Range Trading",              "strategy:range"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-indicators/", "Best Forex Indicators",                   "indicator:overview"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-indicators/best-trend-indicators/", "Best Trend Indicators","indicator:trend"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-indicators/best-momentum-indicators/", "Momentum Indicators","indicator:momentum"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-indicators/best-volume-indicators/", "Volume Indicators", "indicator:volume"),
+    ("https://www.litefinance.org/blog/for-beginners/best-forex-indicators/best-volatility-indicators/", "Volatility Indicators","indicator:volatility"),
+    ("https://www.litefinance.org/blog/for-beginners/risk-management/", "Risk Management",                                "risk:basics"),
+    ("https://www.litefinance.org/blog/for-beginners/how-to-trade-forex/", "How to Trade Forex",                          "forex:basics"),
+    ("https://www.litefinance.org/blog/for-beginners/how-to-trade-forex/how-to-read-japanese-candlesticks/", "How to Read Japanese Candlesticks","candlestick"),
 ]
 
 
@@ -105,6 +236,61 @@ TR_TA_PATTERNS: list[tuple[str, str, str]] = [
      "swing"),
     (r"(?i)(risk yönetimi|risk management|pozisyon büyüklüğü)",
      "Risk yönetimi: tek trade'de sermayenin %1-2'si; ardışık 3 kayıp sonrası pozisyon boyutunu yarıla",
+     "*"),
+    # İngilizce ek pattern'lar (Babypips / Investopedia / LiteFinance)
+    (r"(?i)(multi.?time.?frame|mtf|higher.?timeframe)",
+     "Multi-timeframe (MTF) confluence: üst-TF trend yönü filtre, alt-TF entry — sinyal kalitesi artar",
+     "swing"),
+    (r"(?i)(breakout|break.?out|range.?expansion)",
+     "Breakout: konsolidasyon sonrası volatilite genişlemesi; hacim teyidi şart, fake-out riski var",
+     "day"),
+    (r"(?i)(mean.?reversion|reversion to mean|overextended)",
+     "Mean reversion: aşırı uzayan fiyat geri çeker; range piyasada güçlü, trendde tehlikeli",
+     "scalp"),
+    (r"(?i)(momentum|trend.?follow|trend.?riding)",
+     "Momentum/trend-follow: kazananları bırak, kaybedenleri kes; pyramiding ile pozisyon büyüt",
+     "swing"),
+    (r"(?i)(stop.?loss|protective stop|trailing.?stop)",
+     "Stop loss: önceden tanımlı maksimum kayıp; ATR×1.5 veya yapısal seviye altı standart",
+     "*"),
+    (r"(?i)(position.?siz|kelly|fixed.?fractional)",
+     "Position sizing: Kelly criterion (fractional) veya fixed-%; sermayenin %1-2'si trade başına",
+     "*"),
+    (r"(?i)(divergence|hidden divergence|regular divergence)",
+     "Divergence: fiyat ve momentum (RSI/MACD) zıt yönde — reversal erken sinyali",
+     "swing"),
+    (r"(?i)(elliott|wave.?count|impulse.?wave|corrective.?wave)",
+     "Elliott wave: 5 impulse + 3 corrective; sayım sübjektif, tek başına entry yetmez",
+     "swing"),
+    (r"(?i)(ichimoku|kumo|tenkan|kijun)",
+     "Ichimoku: bulut (kumo) trend filtre; tenkan/kijun cross sinyal; geç ama güçlü",
+     "swing"),
+    (r"(?i)(supply.?(zone|area)|demand.?(zone|area)|order.?block)",
+     "Supply/demand zones: kurumsal emir bölgeleri; fiyat bu zone'lara dönerse reaksiyon olası",
+     "swing"),
+    (r"(?i)(macd|signal line cross|histogram)",
+     "MACD: signal cross momentum; histogram divergence reversal; 12/26/9 default ama optimize edilebilir",
+     "day"),
+    (r"(?i)(stochastic|%k|%d|stoch crossover)",
+     "Stochastic: %K/%D crossover; 80 üstü aşırı alım, 20 altı aşırı satım — range'de daha güvenilir",
+     "scalp"),
+    (r"(?i)(adx|directional.?movement|trend.?strength)",
+     "ADX: trend gücü ölçer; >25 trend, <20 range — rejim filtresi olarak kullan",
+     "*"),
+    (r"(?i)(parabolic.?sar|psar)",
+     "Parabolic SAR: trailing stop indicator; trend yönü flip — geç sinyaller verir",
+     "swing"),
+    (r"(?i)(sharpe|sortino|calmar|risk.?adjusted)",
+     "Risk-adjusted metrics: Sharpe (vol), Sortino (downside vol), Calmar (DD) — promotion gate",
+     "*"),
+    (r"(?i)(walk.?forward|out.?of.?sample|oos|in.?sample)",
+     "Walk-forward / OOS validation: train/test split şart; in-sample overfit yakalama",
+     "*"),
+    (r"(?i)(monte.?carlo|bootstrap|equity.?curve simulation)",
+     "Monte Carlo: equity curve perturbation, max DD distribution — robustness ölçümü",
+     "*"),
+    (r"(?i)(drawdown|max.?dd|equity curve)",
+     "Drawdown: peak-trough sermaye düşüşü; max DD %20 kritik eşik, recovery time önemli",
      "*"),
 ]
 
@@ -265,6 +451,123 @@ Makale (kısaltılmış):
         return lessons
 
     # ------------------------------------------------------------------
+    # Source-bazlı ingest helper'ları — rotated cursor + state file
+    # ------------------------------------------------------------------
+
+    def _ingest_one_url(self, url: str, title: str, tag_hint: str) -> int:
+        """Tek bir URL'i çek, lesson'ları journal'a yaz; eklenen ders sayısını dön."""
+        article = self.fetch_article(url, title, tag_hint)
+        if article is None:
+            return 0
+        added = 0
+        for lesson in self.extract_lessons_rule_based(article):
+            self.journal.save(lesson)
+            added += 1
+        if self.use_llm:
+            for lesson in self.extract_lessons_llm(article):
+                self.journal.save(lesson)
+                added += 1
+        return added
+
+    def _rotated_ingest(
+        self,
+        source_key: str,
+        url_list: list[tuple[str, str, str]],
+        max_pages: int,
+    ) -> dict[str, Any]:
+        """``url_list`` üzerinde rotated cursor ile ``max_pages`` sayfa ingest et.
+
+        State: artifacts/curriculum_state.json içinde
+            {source_key: {"cursor": int, "processed": {url: ts_iso, ...}}}.
+        Cursor mod operatörü ile dolaşır — liste sonuna gelince başa döner.
+        """
+        if not url_list:
+            return {"source": source_key, "fetched": 0, "lessons": 0, "cursor": 0}
+        state = _load_state()
+        src = state.setdefault(source_key, {"cursor": 0, "processed": {}})
+        cursor = int(src.get("cursor", 0)) % len(url_list)
+        processed: dict[str, str] = src.setdefault("processed", {})
+
+        fetched = 0
+        lessons = 0
+        last_url = None
+        for _ in range(max(1, max_pages)):
+            url, title, tag_hint = url_list[cursor]
+            added = self._ingest_one_url(url, title, tag_hint)
+            if added > 0:
+                fetched += 1
+                lessons += added
+            # 200 OK olsun olmasın cursor ilerletilir — hatalı URL'i sonsuz tekrar etmemek için
+            processed[url] = datetime.now(timezone.utc).isoformat()
+            last_url = url
+            cursor = (cursor + 1) % len(url_list)
+            time.sleep(0.5)
+
+        src["cursor"] = cursor
+        src["processed"] = processed
+        src["last_run"] = datetime.now(timezone.utc).isoformat()
+        src["last_url"] = last_url
+        state[source_key] = src
+        _save_state(state)
+        return {
+            "source": source_key,
+            "fetched": fetched,
+            "lessons": lessons,
+            "cursor": cursor,
+            "total_urls": len(url_list),
+        }
+
+    # --- yabancı kaynak shortcut'ları --------------------------------
+
+    def ingest_babypips(self, max_pages: int = 1) -> int:
+        """Babypips'den ``max_pages`` sayfa çek. Eklenen ders sayısını dön."""
+        out = self._rotated_ingest("babypips", BABYPIPS_DERSLER, max_pages)
+        return int(out.get("lessons", 0))
+
+    def ingest_investopedia(self, max_pages: int = 1) -> int:
+        out = self._rotated_ingest("investopedia", INVESTOPEDIA_DERSLER, max_pages)
+        return int(out.get("lessons", 0))
+
+    def ingest_litefinance(self, max_pages: int = 1) -> int:
+        out = self._rotated_ingest("litefinance", LITEFINANCE_DERSLER, max_pages)
+        return int(out.get("lessons", 0))
+
+    def ingest_borsaninizinden_step(self, max_pages: int = 1) -> int:
+        """Rotated step (daimi mode için) — tüm listeyi tek seferde çekmek
+        yerine her tetiklemede ``max_pages`` sayfa."""
+        out = self._rotated_ingest("borsaninizinden", BORSANINIZINDEN_DERSLER, max_pages)
+        return int(out.get("lessons", 0))
+
+    def loop_step(self) -> dict[str, Any]:
+        """EducatorLoop'un her tetiklemede çağırdığı tek-adım rutin.
+
+        4 kaynaktan birer sayfa çeker — borsaninizinden + babypips +
+        investopedia + litefinance. Her kaynak kendi cursor'ını ilerletir,
+        aynı sayfa hemen tekrar edilmez. Hata durumunda diğer kaynakları
+        bloke etmez (her biri ayrı try/except).
+        """
+        result: dict[str, Any] = {
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "sources": {},
+            "total_lessons": 0,
+            "errors": [],
+        }
+        for src_key, ingest_fn in (
+            ("borsaninizinden", lambda: self._rotated_ingest("borsaninizinden", BORSANINIZINDEN_DERSLER, 1)),
+            ("babypips",        lambda: self._rotated_ingest("babypips",        BABYPIPS_DERSLER,        1)),
+            ("investopedia",    lambda: self._rotated_ingest("investopedia",    INVESTOPEDIA_DERSLER,    1)),
+            ("litefinance",     lambda: self._rotated_ingest("litefinance",     LITEFINANCE_DERSLER,     1)),
+        ):
+            try:
+                out = ingest_fn()
+                result["sources"][src_key] = out
+                result["total_lessons"] += int(out.get("lessons", 0))
+            except Exception as exc:  # noqa: BLE001
+                result["errors"].append(f"{src_key}: {type(exc).__name__}: {exc}")
+        result["finished_at"] = datetime.now(timezone.utc).isoformat()
+        return result
+
+    # ------------------------------------------------------------------
 
     def ingest_borsaninizinden(self) -> dict[str, Any]:
         return self.ingest(BORSANINIZINDEN_DERSLER)
@@ -333,3 +636,17 @@ Makale (kısaltılmış):
 def _domain(url: str) -> str:
     m = re.search(r"https?://([^/]+)", url or "")
     return m.group(1) if m else "unknown"
+
+
+# Faz 7 — kısa alias (EducatorLoop ve smoke testler için).
+CurriculumLoader = TalosCurriculumLoader
+
+__all__ = [
+    "ArticleContent",
+    "BABYPIPS_DERSLER",
+    "BORSANINIZINDEN_DERSLER",
+    "CurriculumLoader",
+    "INVESTOPEDIA_DERSLER",
+    "LITEFINANCE_DERSLER",
+    "TalosCurriculumLoader",
+]

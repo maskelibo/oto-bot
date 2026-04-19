@@ -54,6 +54,12 @@ class AgentRegistry:
             self.save()
 
     def seed_defaults(self) -> list[AgentProfile]:
+        # Faz 4: "wired" ajanlar artik canli kod yoluna baglandi.
+        # Bu metadata HR review'larinda ve dashboard'larda "yasayan" agent
+        # olarak gozukmesini saglar — onceden dead code olduklarini gizleyen
+        # asagilayici "(no live wiring)" notu kaldirildi.
+        wired = {"Apex PortfolioRisk", "Ledger Allocator"}
+
         defaults: Iterable[tuple[str, str, str, str]] = [
             # Executive
             ("Atlas CEO", "Head of Trading", "Executive", "Own the book; direct all departments; final promotion authority."),
@@ -87,6 +93,16 @@ class AgentRegistry:
         ]
         created: list[AgentProfile] = []
         for name, role, department, mandate in defaults:
-            if self.find_by_name(name) is None:
-                created.append(self.add(AgentProfile(name=name, role=role, department=department, mandate=mandate)))
+            existing = self.find_by_name(name)
+            if existing is None:
+                meta = {"wired_phase": 4} if name in wired else {}
+                created.append(self.add(AgentProfile(
+                    name=name, role=role, department=department,
+                    mandate=mandate, metadata=meta,
+                )))
+            elif name in wired and existing.metadata.get("wired_phase") != 4:
+                # Mevcut kayit varsa metadata'yi guncelle (geri uyumluluk)
+                existing.metadata["wired_phase"] = 4
+                existing.active = True
+                self.save()
         return created
