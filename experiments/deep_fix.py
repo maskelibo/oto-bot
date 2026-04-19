@@ -24,7 +24,7 @@ import pandas as pd
 from datetime import datetime, timezone
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/Users/ibrahimpeyman/Documents/oto-bot/src')
+sys.path.insert(0, 'C:/Users/koray/projeler/oto-bot/src')
 
 import ta
 from oto_bot.data.crypto import CryptoDataProvider
@@ -752,7 +752,7 @@ def make_serializable(obj):
         return bool(obj)
     return obj
 
-with open('/Users/ibrahimpeyman/Documents/oto-bot/artifacts/v3_adaptive_results.json', 'w') as f:
+with open('C:/Users/koray/projeler/oto-bot/artifacts/v3_adaptive_results.json', 'w') as f:
     json.dump(make_serializable(all_results), f, indent=2, default=str)
 
 print("\nResults saved to artifacts/v3_adaptive_results.json")

@@ -42,11 +42,29 @@ Primary objective:
 2. Strategy R&D
 3. Quant Research
 4. Data Engineering
-5. Backtest & Simulation
-6. Execution & Broker Adapters
-7. Risk & Governance
+5. Backtest & Simulation (includes Stress Lab)
+6. Execution & Broker Adapters (includes TCA + Pod Allocator)
+7. Risk & Governance (includes independent Portfolio Risk + Pre-Mortem)
 8. Memory & Knowledge Systems
-9. Performance Analytics
+9. Performance Analytics (includes PnL Attribution)
+10. Macro / Regime (Mercury Macro + Regime Oracle)
+
+### Institutional agents
+- **Atlas CEO** — Head of Trading, owns the book, final authority.
+- **Iris ChiefOfStaff** — execution tracker.
+- **Apex PortfolioRisk** — independent book-level risk; reports to CEO; veto authority.
+- **Mercury Macro** — cross-asset overlay; risk-on/off bias.
+- **Regime Oracle** — regime classifier per market.
+- **Cassandra PreMortem** — systematic failure-mode scan.
+- **Shockwave StressLab** — named historical scenarios.
+- **Tariq TCA** — execution quality (slippage, impact, latency).
+- **Ledger Allocator** — pod-based capital allocation with auto stop-out.
+- **Ledger Attribution** — per-trade PnL decomposition.
+
+### Committee structure
+- **Investment Committee**: promotion decisions (weekly, Atlas chairs).
+- **Risk Committee**: book drawdowns, VaR, TCA (weekly, Atlas chairs).
+- **Pre-Mortem Council**: failure-mode review before any promotion (ad-hoc, Cassandra chairs).
 
 ## CEO rules
 CEO responsibilities:
@@ -129,6 +147,14 @@ Required:
 - max correlated exposure
 - kill-switch on abnormal behavior
 - stop all promotions if unexplained metric drift occurs
+
+## Pod doctrine (institutional)
+- Every strategy runs as an independent pod with allocated capital.
+- **Auto-halve** at -5% pod drawdown.
+- **Auto-retire** at -7.5% pod drawdown.
+- Max single pod concentration = 20% of book.
+- Rebalance daily: Sharpe-weighted, drawdown-penalized.
+- Apex PortfolioRisk has VETO on any pod that pushes book risk to red/black.
 
 ## Research doctrine
 - prefer simple strategies before complex ensembles

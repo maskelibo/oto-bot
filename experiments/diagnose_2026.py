@@ -11,7 +11,7 @@ import pandas as pd
 from datetime import datetime, timezone
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/Users/ibrahimpeyman/Documents/oto-bot/src')
+sys.path.insert(0, 'C:/Users/koray/projeler/oto-bot/src')
 
 from oto_bot.data.crypto import CryptoDataProvider
 from oto_bot.strategies.base import StrategyContext
@@ -23,7 +23,7 @@ COINS = ['BTC/USDT','ETH/USDT','SOL/USDT','ADA/USDT','DOGE/USDT','ALGO/USDT',
          'INJ/USDT','PEPE/USDT','WLD/USDT','AAVE/USDT','NEAR/USDT',
          'BNB/USDT','XRP/USDT','AVAX/USDT','DOT/USDT','UNI/USDT','APT/USDT','ARB/USDT','ATOM/USDT']
 
-PARAMS = json.load(open('/Users/ibrahimpeyman/Documents/oto-bot/artifacts/v5_regime_fix.json'))['params']
+PARAMS = json.load(open('C:/Users/koray/projeler/oto-bot/artifacts/v5_regime_fix.json'))['params']
 
 # Realistic costs
 COMMISSION_RATE = 0.001  # 0.1% per side
@@ -446,7 +446,7 @@ def make_serializable(obj):
         return bool(obj)
     return obj
 
-with open('/Users/ibrahimpeyman/Documents/oto-bot/artifacts/diagnosis_2026.json', 'w') as f:
+with open('C:/Users/koray/projeler/oto-bot/artifacts/diagnosis_2026.json', 'w') as f:
     json.dump(make_serializable(diag), f, indent=2, default=str)
 
 print("\n\nDiagnostic data saved to artifacts/diagnosis_2026.json")

@@ -60,7 +60,7 @@ class RiskPolicy:
         if not yaml_path.exists():
             return cls()
 
-        with open(yaml_path, "r") as fh:
+        with open(yaml_path, "r", encoding="utf-8") as fh:
             raw: dict[str, Any] = yaml.safe_load(fh) or {}
 
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]

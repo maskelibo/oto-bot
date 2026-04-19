@@ -55,16 +55,35 @@ class AgentRegistry:
 
     def seed_defaults(self) -> list[AgentProfile]:
         defaults: Iterable[tuple[str, str, str, str]] = [
-            ("Atlas CEO", "CEO", "Executive", "Own the lab and manage agents."),
-            ("Iris ChiefOfStaff", "Chief of Staff", "Executive", "Track execution and dependencies."),
-            ("Vega MarketIntel", "Market Intelligence", "Research", "Monitor market structure."),
-            ("Nova StrategyRND", "Strategy R&D", "Research", "Generate hypotheses."),
-            ("Sigma Quant", "Quant Research", "Research", "Design signals and validations."),
-            ("Helix Backtest", "Backtest", "Simulation", "Run backtests and stress tests."),
-            ("Sentinel Risk", "Risk & Governance", "Governance", "Enforce risk gates."),
-            ("Archive Memory", "Memory Architect", "Knowledge", "Compress and store lessons."),
-            ("Pulse Analytics", "Performance Analytics", "Analytics", "Score experiments."),
-            ("Forge Execution", "Execution Engineer", "Execution", "Own paper/live execution interfaces."),
+            # Executive
+            ("Atlas CEO", "Head of Trading", "Executive", "Own the book; direct all departments; final promotion authority."),
+            ("Iris ChiefOfStaff", "Chief of Staff", "Executive", "Track execution, dependencies, and committee follow-ups."),
+
+            # Research
+            ("Vega MarketIntel", "Market Intelligence", "Research", "Scan markets for regime-appropriate opportunities."),
+            ("Nova StrategyRND", "Strategy R&D", "Research", "Generate hypotheses and strategy variants."),
+            ("Sigma Quant", "Quant Research", "Research", "Validate statistical significance and detect overfitting."),
+            ("Mercury Macro", "Macro Strategist", "Research", "Cross-asset overlay: risk-on/off, dominance, macro bias."),
+            ("Regime Oracle", "Regime Classifier", "Research", "Classify market regimes per instrument."),
+
+            # Simulation
+            ("Helix Backtest", "Backtest", "Simulation", "Run backtests with realistic execution assumptions."),
+            ("Shockwave StressLab", "Stress Lab", "Simulation", "Run named stress scenarios against promotion candidates."),
+
+            # Governance / Risk
+            ("Sentinel Risk", "Risk Gatekeeper", "Governance", "Enforce per-strategy risk policy gates."),
+            ("Apex PortfolioRisk", "Portfolio Risk", "Governance", "Independent book-level risk; VaR/ES/correlation; veto authority."),
+            ("Cassandra PreMortem", "Pre-Mortem Analyst", "Governance", "Systematic failure-mode scan before promotion."),
+
+            # Execution
+            ("Forge Execution", "Execution Engineer", "Execution", "Paper trading execution, kill-switch, order management."),
+            ("Tariq TCA", "Execution QA", "Execution", "Transaction cost analysis; slippage/impact/latency measurement."),
+            ("Ledger Allocator", "Capital Allocator", "Execution", "Pod capital allocation, rebalance, auto stop-out."),
+
+            # Knowledge / Analytics
+            ("Archive Memory", "Memory Architect", "Knowledge", "Compress, index, and archive experiment history."),
+            ("Pulse Analytics", "Performance Analytics", "Analytics", "Score strategies on risk-adjusted metrics."),
+            ("Ledger Attribution", "PnL Attribution", "Analytics", "Decompose PnL by signal, symbol, regime, hour."),
         ]
         created: list[AgentProfile] = []
         for name, role, department, mandate in defaults:

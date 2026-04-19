@@ -1,17 +1,72 @@
 executive:
-  ceo: Atlas CEO
+  head_of_trading: Atlas CEO
   chief_of_staff: Iris ChiefOfStaff
 
+# Kurumsal masa doktrini: bağımsız risk ve governance fonksiyonları
+# doğrudan Head of Trading'e raporlar. Strateji PM'lerine bağımlı değildir.
+governance_principles:
+  - Risk before edge, edge before ROI, ROI without history is meaningless.
+  - Portfolio Risk reports to HoT directly; veto power.
+  - Every promotion passes pre-mortem + stress book + panel debate.
+  - Pods auto-halve at -5% DD and retire at -7.5% DD.
+  - Macro crisis freezes all promotions until regime stabilizes.
+
 departments:
-  - Market Intelligence
-  - Strategy R&D
-  - Quant Research
-  - Data Engineering
-  - Backtest & Simulation
-  - Execution & Broker Adapters
-  - Risk & Governance
-  - Memory & Knowledge Systems
-  - Performance Analytics
+  Executive:
+    - Atlas CEO
+    - Iris ChiefOfStaff
+  Research:
+    - Vega MarketIntel
+    - Nova StrategyRND
+    - Sigma Quant
+    - Mercury Macro
+    - Regime Oracle
+  Simulation:
+    - Helix Backtest
+    - Shockwave StressLab
+  Governance:
+    - Sentinel Risk
+    - Apex PortfolioRisk
+    - Cassandra PreMortem
+  Execution:
+    - Forge Execution
+    - Tariq TCA
+    - Ledger Allocator
+  Knowledge:
+    - Archive Memory
+  Analytics:
+    - Pulse Analytics
+    - Ledger Attribution
+
+committees:
+  investment_committee:
+    chair: Atlas CEO
+    members:
+      - Nova StrategyRND
+      - Sigma Quant
+      - Pulse Analytics
+      - Mercury Macro
+      - Apex PortfolioRisk
+      - Cassandra PreMortem
+    cadence: weekly
+    mandate: Promote / iterate / reject strategy candidates.
+  risk_committee:
+    chair: Atlas CEO
+    members:
+      - Sentinel Risk
+      - Apex PortfolioRisk
+      - Tariq TCA
+      - Ledger Allocator
+    cadence: weekly
+    mandate: Review pod drawdowns, VaR breaches, correlation drift, execution quality.
+  premortem_council:
+    chair: Cassandra PreMortem
+    members:
+      - Sigma Quant
+      - Apex PortfolioRisk
+      - Tariq TCA
+    cadence: ad-hoc (before promotion)
+    mandate: Stress-test proposals against failure taxonomy.
 
 strategy_families:
   - day
@@ -23,3 +78,27 @@ markets:
   - forex
   - us_equities
   - bist
+
+pod_rules:
+  auto_halve_at_dd: -0.05
+  auto_retire_at_dd: -0.075
+  max_single_pod_pct_of_book: 0.20
+  min_sharpe_for_capital_boost: 0.5
+
+debate_panel:
+  - Sentinel Risk
+  - Sigma Quant
+  - Nova StrategyRND
+  - Pulse Analytics
+  - Mercury Macro
+  - Apex PortfolioRisk
+  - Tariq TCA
+  - Cassandra PreMortem
+
+stress_library_default:
+  - covid_march_2020
+  - luna_may_2022
+  - ftx_nov_2022
+  - flash_crash_2010
+  - slow_bleed
+  - vol_compression_regime

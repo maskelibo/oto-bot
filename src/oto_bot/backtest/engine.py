@@ -827,6 +827,73 @@ class BacktestEngine:
         stability = max(0.0, min(1.0, 1.0 + max_drawdown * 2.0))
         avg_trade_duration = float(trade_durations.mean())
 
+        # Trade-level aggregates
+        largest_win_pct = float(wins.max()) if len(wins) else 0.0
+        largest_loss_pct = float(losses.min()) if len(losses) else 0.0
+        avg_win_pct = float(wins.mean()) if len(wins) else 0.0
+        avg_loss_pct = float(losses.mean()) if len(losses) else 0.0
+
+        # Max consecutive wins / losses (streak analysis)
+        max_consec_w = 0
+        max_consec_l = 0
+        cur_w = 0
+        cur_l = 0
+        for ret in trade_returns:
+            if ret > 0:
+                cur_w += 1
+                cur_l = 0
+                if cur_w > max_consec_w:
+                    max_consec_w = cur_w
+            else:
+                cur_l += 1
+                cur_w = 0
+                if cur_l > max_consec_l:
+                    max_consec_l = cur_l
+
+        gross_profit_pct = float(gross_profit / cfg.initial_capital) if cfg.initial_capital > 0 else 0.0
+        gross_loss_pct = float(gross_loss / cfg.initial_capital) if cfg.initial_capital > 0 else 0.0
+
+        # Top trades (top 5 by pnl; top 5 by leverage)
+        def _trade_snapshot(t: TradeRecord) -> dict[str, Any]:
+            return {
+                "entry_idx": int(t.entry_idx),
+                "exit_idx": int(t.exit_idx),
+                "entry_price": round(float(t.entry_price), 6),
+                "exit_price": round(float(t.exit_price), 6),
+                "direction": "long" if t.direction > 0 else "short",
+                "size": round(float(t.size), 6),
+                "pnl": round(float(t.pnl), 4),
+                "return_pct": round(float(t.return_pct), 6),
+                "duration_bars": int(t.duration_bars),
+                "symbol": t.symbol or "",
+                "leverage": round(float(t.leverage), 2),
+                "margin_used": round(float(t.margin_used), 2),
+                "exit_reason": t.exit_reason or "signal",
+                "trail_activated": bool(t.trail_activated),
+                "partial_count": len(t.partial_exits) if t.partial_exits else 0,
+            }
+
+        top_pnl = sorted(trades, key=lambda t: t.pnl, reverse=True)[:5]
+        top_lev = sorted(trades, key=lambda t: t.leverage, reverse=True)[:5]
+        top_trades_by_pnl = [_trade_snapshot(t) for t in top_pnl]
+        top_trades_by_leverage = [_trade_snapshot(t) for t in top_lev]
+
+        # Exit reason distribution
+        exit_counts: dict[str, int] = {}
+        for t in trades:
+            er = t.exit_reason or "signal"
+            exit_counts[er] = exit_counts.get(er, 0) + 1
+
+        # Leverage & direction stats
+        leverages = [t.leverage for t in trades if t.leverage]
+        avg_lev = float(sum(leverages) / len(leverages)) if leverages else 1.0
+        max_lev = float(max(leverages)) if leverages else 1.0
+        long_ct = sum(1 for t in trades if t.direction > 0)
+        short_ct = sum(1 for t in trades if t.direction < 0)
+
+        # Symbol + params — context taşıyor
+        first_symbol = next((t.symbol for t in trades if t.symbol), "")
+
         regime = self._detect_regime(frame)
 
         # Promotion gate
@@ -869,6 +936,25 @@ class BacktestEngine:
             regime=regime,
             walkforward_sharpe=None,
             montecarlo_95_drawdown=None,
+            largest_win_pct=largest_win_pct,
+            largest_loss_pct=largest_loss_pct,
+            avg_win_pct=avg_win_pct,
+            avg_loss_pct=avg_loss_pct,
+            max_consecutive_wins=int(max_consec_w),
+            max_consecutive_losses=int(max_consec_l),
+            duration_bars=int(n_bars),
+            bar_timeframe=context.timeframe or "1h",
+            gross_profit_pct=gross_profit_pct,
+            gross_loss_pct=gross_loss_pct,
+            symbol=context.symbol or first_symbol,
+            top_trades_by_pnl=top_trades_by_pnl,
+            top_trades_by_leverage=top_trades_by_leverage,
+            exit_reason_counts=exit_counts,
+            avg_leverage=round(avg_lev, 2),
+            max_leverage_used=round(max_lev, 2),
+            long_trades=int(long_ct),
+            short_trades=int(short_ct),
+            strategy_params=dict(getattr(context, "params", {})) if hasattr(context, "params") else {},
         )
 
     # ------------------------------------------------------------------

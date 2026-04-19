@@ -21,11 +21,11 @@ import pandas as pd
 from datetime import datetime, timezone
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/Users/ibrahimpeyman/Documents/oto-bot/src')
+sys.path.insert(0, 'C:/Users/koray/projeler/oto-bot/src')
 
 import ta
 
-CACHE_FILE = '/Users/ibrahimpeyman/Documents/oto-bot/artifacts/data_cache.pkl'
+CACHE_FILE = 'C:/Users/koray/projeler/oto-bot/artifacts/data_cache.pkl'
 with open(CACHE_FILE, 'rb') as f:
     all_data = pickle.load(f)
 print(f"Loaded {len(all_data)} coins")
@@ -688,7 +688,7 @@ for name, res in all_results.items():
         '2026': res.get('r2026', {}),
     }
 
-with open('/Users/ibrahimpeyman/Documents/oto-bot/artifacts/v3_profitable_results.json', 'w') as f:
+with open('C:/Users/koray/projeler/oto-bot/artifacts/v3_profitable_results.json', 'w') as f:
     json.dump(make_serializable(save_data), f, indent=2, default=str)
 
 print("\nResults saved to artifacts/v3_profitable_results.json")

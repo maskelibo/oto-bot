@@ -19,15 +19,15 @@ from datetime import datetime, timezone
 from collections import defaultdict
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/Users/ibrahimpeyman/Documents/oto-bot/src')
+sys.path.insert(0, 'C:/Users/koray/projeler/oto-bot/src')
 import ta
 
 # ═══════════════════════════════════════════════════════════════
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════
 
-CACHE_FILE = '/Users/ibrahimpeyman/Documents/oto-bot/artifacts/data_cache.pkl'
-OUTPUT_FILE = '/Users/ibrahimpeyman/Documents/oto-bot/artifacts/v4_multi_strategy.json'
+CACHE_FILE = 'C:/Users/koray/projeler/oto-bot/artifacts/data_cache.pkl'
+OUTPUT_FILE = 'C:/Users/koray/projeler/oto-bot/artifacts/v4_multi_strategy.json'
 
 # Load data
 with open(CACHE_FILE, 'rb') as f:

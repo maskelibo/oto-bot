@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oto-bot · komuta merkezi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">
+      <span class="logo-mark">◉</span>
+      <span class="logo-text">oto-bot</span>
+    </div>
+    <div class="logo-sub">Komuta Merkezi</div>
+  </div>
+
+  <nav class="nav">
+    <button class="nav-item active" data-page="overview"><span class="nav-icon">⌂</span><span>Genel Bakış</span></button>
+    <button class="nav-item" data-page="executive"><span class="nav-icon">📜</span><span>Yönetici Özeti</span></button>
+    <button class="nav-item" data-page="agents"><span class="nav-icon">◆</span><span>Ajanlar</span></button>
+    <button class="nav-item" data-page="org"><span class="nav-icon">⚭</span><span>Org Şeması</span></button>
+    <button class="nav-item" data-page="workflow"><span class="nav-icon">↝</span><span>İş Akışı</span></button>
+    <button class="nav-item" data-page="projects"><span class="nav-icon">▦</span><span>Bot Projeleri</span></button>
+    <button class="nav-item" data-page="goals"><span class="nav-icon">◎</span><span>Hedefler</span></button>
+    <button class="nav-item" data-page="pods"><span class="nav-icon">▣</span><span>Pod'lar</span></button>
+    <button class="nav-item" data-page="live"><span class="nav-icon">⚡</span><span>Canlı Akış</span></button>
+    <button class="nav-item" data-page="learn"><span class="nav-icon">📖</span><span>Öğrenilenler</span></button>
+    <button class="nav-item" data-page="hr"><span class="nav-icon">👔</span><span>İnsan Kaynakları</span></button>
+    <button class="nav-item" data-page="lab"><span class="nav-icon">🧪</span><span>Laboratuvar</span></button>
+  </nav>
+
+  <!-- ONAY BEKLEYEN BADGE — en belirgin yer -->
+  <div id="pending-approval-banner" class="pending-banner hidden" onclick="show('lab')">
+    <span class="pending-badge-dot"></span>
+    <span><span id="pending-count-badge">0</span> onay bekliyor</span>
+    <span class="pending-arrow">→</span>
+  </div>
+
+  <div class="sidebar-stats">
+    <div class="stat-row"><span>Deneyler</span><span id="stat-experiments" class="mono">0</span></div>
+    <div class="stat-row"><span>Kararlar</span><span id="stat-decisions" class="mono">0</span></div>
+    <div class="stat-row"><span>Debate'ler</span><span id="stat-debates" class="mono">0</span></div>
+    <div class="stat-row"><span>Aktif ajan</span><span id="stat-agents" class="mono">0</span></div>
+    <div class="stat-row accent"><span>🏆 Kazanan</span><span id="stat-winners" class="mono">0</span></div>
+    <div class="stat-row" id="queue-row" style="display:none"><span>📅 Test kuyruk</span><span id="stat-queue" class="mono" style="color:var(--accent-hi)">0</span></div>
+  </div>
+
+  <div class="sidebar-foot">
+    <label class="switch">
+      <input type="checkbox" id="auto-refresh" checked>
+      <span>Otomatik yenile (15 sn)</span>
+    </label>
+    <div class="build">Atlas CEO doktrini · v1.0</div>
+  </div>
+</aside>
+
+<!-- Main -->
+<main class="main">
+
+<!-- OVERVIEW -->
+<section class="page" id="page-overview">
+  <header class="page-head">
+    <div>
+      <h1>Komuta merkezi</h1>
+      <p class="subtitle">Paper trading laboratuvarı · Risk-ayarlı öncelikli · Atlas CEO doktrini</p>
+    </div>
+    <div class="pill" id="live-indicator">
+      <span class="dot"></span>Otonom loop · çalışıyor
+    </div>
+  </header>
+
+  <!-- Live "Şu an" panel -->
+  <div class="card live-now">
+    <div class="live-now-head">
+      <div>
+        <div class="live-now-label">🔴 ŞU AN</div>
+        <div class="live-now-title" id="live-title">—</div>
+        <div class="live-now-meta" id="live-meta">—</div>
+      </div>
+      <div class="live-now-phase">
+        <div class="phase-badge" id="live-phase">—</div>
+        <div class="live-now-cycle">cycle <span id="live-cycle" class="mono">0</span></div>
+      </div>
+    </div>
+    <div class="live-now-agents">
+      <div class="live-agents-label">ÇALIŞAN AJANLAR</div>
+      <div id="live-agents" class="agent-chips"></div>
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Toplam deney</div>
+      <div class="kpi-value mono" id="kpi-experiments">—</div>
+      <div class="kpi-delta">tüm zamanlar</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Promote</div>
+      <div class="kpi-value mono" id="kpi-promoted">—</div>
+      <div class="kpi-delta">eşikleri geçen</div>
+    </div>
+    <div class="kpi accent-gold">
+      <div class="kpi-label">Kazanan</div>
+      <div class="kpi-value mono" id="kpi-winners">—</div>
+      <div class="kpi-delta">%60 CAGR hedefi</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Aktif ajan</div>
+      <div class="kpi-value mono" id="kpi-active-agents">—</div>
+      <div class="kpi-delta">17 kadro</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Aktif pod</div>
+      <div class="kpi-value mono" id="kpi-active-pods">—</div>
+      <div class="kpi-delta">sermaye dağılımı</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Ort. Sharpe</div>
+      <div class="kpi-value mono" id="kpi-avg-sharpe">—</div>
+      <div class="kpi-delta">son 500 deney</div>
+    </div>
+  </div>
+
+  <div class="row-2">
+    <div class="card">
+      <div class="card-head"><h3>Sharpe seyri <span class="muted">— son 50 deney</span></h3></div>
+      <div class="chart-wrap"><canvas id="chart-sharpe"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>ROI dağılımı <span class="muted">— son 100</span></h3></div>
+      <div class="chart-wrap"><canvas id="chart-roi"></canvas></div>
+    </div>
+  </div>
+
+  <div class="row-2">
+    <div class="card">
+      <div class="card-head"><h3>🥇 En iyi 5 (Sharpe)</h3></div>
+      <div id="table-best"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>📉 En kötü 5</h3></div>
+      <div id="table-worst"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>🕒 Son aktivite</h3></div>
+    <div id="activity-feed" class="feed"></div>
+  </div>
+</section>
+
+<!-- EXECUTIVE SUMMARY -->
+<section class="page hidden" id="page-executive">
+  <header class="page-head">
+    <div>
+      <h1>📜 Yönetici özeti</h1>
+      <p class="subtitle">Saatlik aktivite raporu · en iyi botlar · geliştirme adayları · CEO tanısı</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label style="color:var(--text-3);font-size:0.82rem">Periyot:</label>
+      <select id="exec-period" class="input narrow" onchange="renderExecutive()">
+        <option value="1">Son 1 saat</option>
+        <option value="6">Son 6 saat</option>
+        <option value="24" selected>Son 24 saat</option>
+        <option value="168">Son 7 gün</option>
+      </select>
+    </div>
+  </header>
+
+  <div id="exec-body"></div>
+</section>
+
+<!-- AGENTS -->
+<section class="page hidden" id="page-agents">
+  <header class="page-head">
+    <div>
+      <h1>Ajan kadrosu</h1>
+      <p class="subtitle">Her kart ne yaptığını ve temel özelliklerini gösterir · <span id="agents-counter"></span></p>
+    </div>
+  </header>
+
+  <div class="filters">
+    <select id="agents-dept" class="input"></select>
+    <input id="agents-search" type="search" placeholder="Ara (isim / rol)…" class="input">
+    <label class="switch inline">
+      <input type="checkbox" id="agents-active-only" checked>
+      <span>Sadece aktif</span>
+    </label>
+  </div>
+
+  <div id="agents-grid" class="agents-grid"></div>
+</section>
+
+<!-- ORG -->
+<section class="page hidden" id="page-org">
+  <header class="page-head">
+    <div>
+      <h1>Organizasyon şeması</h1>
+      <p class="subtitle">Atlas CEO'dan departmanlara raporlama hattı · düğümleri sürükle</p>
+    </div>
+  </header>
+  <div class="card">
+    <div id="org-graph" class="graph-box"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>⚖️ Komiteler</h3></div>
+    <div id="committees"></div>
+  </div>
+</section>
+
+<!-- WORKFLOW -->
+<section class="page hidden" id="page-workflow">
+  <header class="page-head">
+    <div>
+      <h1>Araştırma iş akışı</h1>
+      <p class="subtitle">n8n tarzı · interaktif · her düğüm bir ajan</p>
+    </div>
+  </header>
+  <div class="card">
+    <div id="workflow-graph" class="graph-box"></div>
+  </div>
+  <div class="row-3">
+    <div class="card mini">
+      <h4>1. Araştırma</h4>
+      <p>Nova hipotez üretir; Vega pazarı, Mercury makroyu, Regime Oracle rejimi etiketler.</p>
+    </div>
+    <div class="card mini">
+      <h4>2. Simülasyon + Yönetişim</h4>
+      <p>Helix backtest, Shockwave stres, Sentinel risk gate, Apex kitap VaR (veto), Cassandra pre-mortem.</p>
+    </div>
+    <div class="card mini">
+      <h4>3. Panel + Karar</h4>
+      <p>8-sesli debate → CEO karar. Promote → Ledger pod açar, Forge paper execute eder, Tariq TCA ölçer.</p>
+    </div>
+  </div>
+</section>
+
+<!-- PROJECTS -->
+<section class="page hidden" id="page-projects">
+  <header class="page-head">
+    <div>
+      <h1>Bot projeleri</h1>
+      <p class="subtitle">Yalnızca <b style="color:#E8B464">her yıl +%50 büyüme</b> filtresini geçen botlar · 1yr ≥50%, 2yr ≥100%, 3yr ≥150%, 4yr ≥200%, 5yr ≥250% ROI</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button onclick="bulkLongHorizonTest()" style="background:var(--accent-soft);border:1px solid var(--accent);color:var(--accent-hi);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500">📅 Hepsini uzun test et</button>
+      <button onclick="pruneBots()" style="background:rgba(191,99,87,0.14);border:1px solid var(--red);color:var(--red);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500">🗑️ Başarısızları sil</button>
+      <button onclick="pruneBotsAggressive()" style="background:rgba(191,99,87,0.2);border:1px solid var(--red);color:var(--red);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:600">🔥 Agresif sil</button>
+      <span style="color:var(--text-3);font-size:0.82rem;margin-left:8px">Sırala:</span>
+      <select id="bots-sort" class="input narrow" onchange="renderProjects()">
+        <option value="linear_score">🏆 Lineer skor</option>
+        <option value="avg_sharpe">Sharpe (ort)</option>
+        <option value="avg_roi">ROI (ort)</option>
+        <option value="total_runs">Run sayısı</option>
+        <option value="promoted_count">Promote sayısı</option>
+        <option value="longest_run_months">En uzun run (ay)</option>
+      </select>
+      <span style="color:var(--text-3);font-size:0.82rem;margin-left:8px">Görünüm:</span>
+      <button id="view-bots" class="view-toggle active" onclick="setProjectsView('bots')">🤖 Bot listesi</button>
+      <button id="view-runs" class="view-toggle" onclick="setProjectsView('runs')">📋 Tüm run'lar</button>
+    </div>
+  </header>
+
+  <div class="filters">
+    <select id="projects-family" class="input"><option value="">Tüm aileler</option></select>
+    <select id="projects-market" class="input"><option value="">Tüm marketler</option></select>
+    <label class="switch inline">
+      <input type="checkbox" id="projects-promoted-only">
+      <span>Sadece promote</span>
+    </label>
+    <label class="switch inline">
+      <input type="checkbox" id="projects-show-all">
+      <span>Hepsini göster</span>
+    </label>
+    <label style="color:var(--text-3);font-size:0.82rem">Hedef tier:</label>
+    <select id="projects-tier" class="input narrow" onchange="renderProjects()">
+      <option value="50" selected>🏆 %50 yıllık (sert)</option>
+      <option value="30">%30 yıllık (makul)</option>
+      <option value="20">%20 yıllık (ulaşılabilir)</option>
+    </select>
+    <input id="projects-min-trades" type="number" min="0" value="0" placeholder="Min trade" class="input narrow">
+    <input id="projects-min-months" type="number" min="0" step="0.5" value="1" placeholder="Min süre (ay)" class="input narrow" title="Minimum backtest süresi — 3 günlük testleri gizle">
+  </div>
+
+  <div class="kpi-grid small" id="projects-kpis"></div>
+
+  <!-- Bot grid (default view) -->
+  <div id="bots-grid" class="bots-grid"></div>
+
+  <!-- Runs table (alt view) -->
+  <div class="card no-pad" id="runs-card" style="display:none">
+    <div id="projects-table" class="table-wrap"></div>
+  </div>
+
+  <div class="card" id="project-detail" style="display:none">
+    <div class="card-head"><h3>🔍 Deney detayı</h3><button class="btn-close" onclick="closeProjectDetail()">✕</button></div>
+    <div id="project-detail-body"></div>
+  </div>
+</section>
+
+<!-- GOALS -->
+<section class="page hidden" id="page-goals">
+  <header class="page-head">
+    <div>
+      <h1>Hedefler ve ilerleme</h1>
+      <p class="subtitle">Ana hedef: yıllık %60 CAGR · Sharpe ≥ 1.5 · DD ≥ -%15 · ≥ 100 trade</p>
+    </div>
+  </header>
+
+  <div class="card highlight">
+    <h3>🏆 Ana hedef · kazanan bir strateji</h3>
+    <div class="goal-track"><div class="goal-fill" id="goal-winners-bar"></div></div>
+    <div class="goal-caption" id="goal-winners-caption">—</div>
+  </div>
+
+  <div class="row-3">
+    <div class="card">
+      <h3>📈 En iyi CAGR</h3>
+      <div class="goal-track"><div class="goal-fill" id="goal-cagr-bar"></div></div>
+      <div class="goal-caption" id="goal-cagr-caption">—</div>
+    </div>
+    <div class="card">
+      <h3>⚖️ En iyi Sharpe</h3>
+      <div class="goal-track"><div class="goal-fill" id="goal-sharpe-bar"></div></div>
+      <div class="goal-caption" id="goal-sharpe-caption">—</div>
+    </div>
+    <div class="card">
+      <h3>🛡️ En iyi DD</h3>
+      <div class="goal-track"><div class="goal-fill" id="goal-dd-bar"></div></div>
+      <div class="goal-caption" id="goal-dd-caption">—</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>🏆 Kazanan stratejiler</h3></div>
+    <div id="winners-table"></div>
+  </div>
+</section>
+
+<!-- PODS -->
+<section class="page hidden" id="page-pods">
+  <header class="page-head">
+    <div>
+      <h1>Pod sermaye dağılımı</h1>
+      <p class="subtitle">Millennium / Citadel tarzı · %5 DD → halve · %7.5 DD → retire</p>
+    </div>
+  </header>
+  <div class="kpi-grid small" id="pods-kpis"></div>
+  <div class="card no-pad">
+    <div id="pods-table" class="table-wrap"></div>
+  </div>
+</section>
+
+<!-- LIVE -->
+<section class="page hidden" id="page-live">
+  <header class="page-head">
+    <div>
+      <h1>Canlı akış</h1>
+      <p class="subtitle">Her ajanın anlık durumu · kaynak kullanımı · son olaylar</p>
+    </div>
+  </header>
+
+  <!-- Resource / token panel -->
+  <div class="kpi-grid small" id="resource-panel"></div>
+
+  <!-- Agent status grid -->
+  <div class="card">
+    <div class="card-head">
+      <h3>👥 Ajan durum tablosu</h3>
+      <div class="legend">
+        <span class="legend-dot" style="background:#22c55e"></span>görevde
+        <span class="legend-dot" style="background:#6366f1"></span>öğreniyor
+        <span class="legend-dot" style="background:#64748b"></span>bekliyor
+        <span class="legend-dot" style="background:#374151"></span>emekli
+      </div>
+    </div>
+    <div id="agent-status-grid" class="status-grid"></div>
+  </div>
+
+  <div class="live-split">
+    <div class="card no-pad terminal-card">
+      <div class="card-head">
+        <h3>autonomous.log</h3>
+        <span class="muted">son 120 satır</span>
+      </div>
+      <pre id="log-box" class="terminal"></pre>
+    </div>
+    <div class="live-side">
+      <div class="card">
+        <div class="card-head"><h3>🧠 Son hipotezler</h3></div>
+        <div id="activity-hypos" class="list-compact"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>⚖️ Son kararlar</h3></div>
+        <div id="activity-decs" class="list-compact"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>🗣️ Son debate oturumları</h3></div>
+        <div id="activity-debs"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- LABORATUVAR (Proposals + GitResearch) -->
+<section class="page hidden" id="page-lab">
+  <header class="page-head">
+    <div>
+      <h1>🧪 Laboratuvar · önerilen evrim</h1>
+      <p class="subtitle">Ajanların senin onayına sunduğu yenilikler · GitHub'dan öğrenme · Claude CLI opsiyonel</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="scanGitHub(false)" style="background:var(--surface-2);border:1px solid var(--border-hi);color:var(--text-1);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500">🔍 GitHub tara</button>
+      <button onclick="scanGitHub(true)" style="background:var(--accent-soft);border:1px solid var(--accent);color:var(--accent-hi);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500">🧠 GitHub tara (Claude)</button>
+      <button onclick="ingestCurriculum(false)" style="background:var(--surface-2);border:1px solid var(--border-hi);color:var(--text-1);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500">📚 Borsanın İzinden dersleri</button>
+      <button onclick="ingestCurriculum(true)" style="background:var(--accent-soft);border:1px solid var(--accent);color:var(--accent-hi);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500">🧠 Borsanın İzinden (Claude)</button>
+    </div>
+  </header>
+
+  <div class="kpi-grid small" id="lab-kpis"></div>
+
+  <!-- Auto-approve switch — 7/24 fabrika modu -->
+  <div class="card" id="settings-card">
+    <div class="card-head"><h3>🏭 Fabrika modu (7/24 otonom)</h3></div>
+    <div id="settings-body" style="display:flex;gap:24px;flex-wrap:wrap;align-items:center"></div>
+  </div>
+
+  <div class="row-2">
+    <div class="card">
+      <div class="card-head"><h3>🧠 Claude CLI durumu</h3></div>
+      <div id="llm-status"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>📊 Öneri dağılımı</h3></div>
+      <div id="proposals-chart-wrap" class="chart-wrap" style="height:220px"><canvas id="chart-proposals"></canvas></div>
+    </div>
+  </div>
+
+  <div class="filters">
+    <select id="prop-status" class="input">
+      <option value="pending">Pending (onay bekleyen)</option>
+      <option value="">Tümü</option>
+      <option value="approved">Approved</option>
+      <option value="rejected">Rejected</option>
+      <option value="implemented">Implemented</option>
+    </select>
+  </div>
+
+  <div id="proposals-list"></div>
+</section>
+
+<!-- İNSAN KAYNAKLARI -->
+<section class="page hidden" id="page-hr">
+  <header class="page-head">
+    <div>
+      <h1>👔 İnsan kaynakları</h1>
+      <p class="subtitle">CEO otomatik olarak specialist alır / atıl ajanı retire eder · şirket gibi iş yükü yönetimi</p>
+    </div>
+    <button class="stBut" onclick="triggerHRReview()" style="background:var(--surface-2);border:1px solid var(--border-hi);color:var(--text-1);padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:500">🔄 Şimdi HR review</button>
+  </header>
+
+  <div class="kpi-grid small" id="hr-kpis"></div>
+
+  <div class="row-2">
+    <div class="card">
+      <div class="card-head"><h3>🏢 Departman kapasitesi</h3></div>
+      <div class="chart-wrap" style="height:280px"><canvas id="chart-dept-capacity"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>📜 Politika kuralları</h3></div>
+      <div id="hr-policy" style="font-size:0.88rem;color:var(--text-2);line-height:1.7"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>👥 Aktif specialist'ler</h3></div>
+    <div id="hr-specialists"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>🗂️ Hiring olayları (geçmiş)</h3></div>
+    <div id="hr-events"></div>
+  </div>
+</section>
+
+<!-- ÖĞRENİLENLER -->
+<section class="page hidden" id="page-learn">
+  <header class="page-head">
+    <div>
+      <h1>📖 Öğrenilenler</h1>
+      <p class="subtitle">Ajanların çıkardığı kompakt dersler · token-ekonomik memory · CEO onaylı öğrenim</p>
+    </div>
+  </header>
+
+  <!-- Summary KPIs -->
+  <div class="kpi-grid small" id="learn-kpis"></div>
+
+  <div class="row-2">
+    <div class="card">
+      <div class="card-head"><h3>📈 Öğrenme eğrisi (haftalık)</h3>
+        <select id="learn-scope" class="input narrow"><option value="all">Tümü (all)</option></select>
+      </div>
+      <div class="chart-wrap" style="height: 260px;"><canvas id="chart-curve"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>⏱️ Günlük üretilen ders (son 30 gün)</h3></div>
+      <div class="chart-wrap" style="height: 260px;"><canvas id="chart-lessons-timeline"></canvas></div>
+    </div>
+  </div>
+
+  <div class="row-3">
+    <div class="card">
+      <div class="card-head"><h3>🎭 Severity dağılımı</h3></div>
+      <div class="chart-wrap" style="height: 240px;"><canvas id="chart-severity"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>🌦️ Rejim dağılımı</h3></div>
+      <div class="chart-wrap" style="height: 240px;"><canvas id="chart-regime"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>🧬 Strateji dağılımı</h3></div>
+      <div class="chart-wrap" style="height: 240px;"><canvas id="chart-strat"></canvas></div>
+    </div>
+  </div>
+
+  <div class="row-2">
+    <div class="card">
+      <div class="card-head"><h3>📊 Ajan başına ders</h3></div>
+      <div id="lessons-by-agent"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>🏆 En çok referans alan 10 ders (CEO onaylı)</h3></div>
+      <div id="top-referenced-lessons"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>🎓 Pipeline nasıl çalışır</h3></div>
+    <div style="color:var(--text-2);font-size:0.9rem;line-height:1.7">
+      Her cycle bitince <b>InsightExtractor</b> sonuçtan 0-3 ders çıkarır →
+      <b>LearningJournal</b> SQLite'a yazar. Sonraki cycle'da <b>MemoryRetriever</b>
+      context'e göre TOP-5'i döndürür; kullanılan ders <code>times_referenced</code>
+      artar. 3+ kez atıf alan ders <span style="color:#fbbf24;font-weight:600">CEO onaylı</span>
+      sayılır (network bu dersi zımni kabul etmiş). 90 gün geçip hiç atıf almayan dersler
+      otomatik prune edilir — token ekonomisi.
+    </div>
+  </div>
+
+  <!-- Lesson filter + table -->
+  <div class="filters">
+    <select id="lesson-agent" class="input"><option value="">Tüm ajanlar</option></select>
+    <select id="lesson-market" class="input"><option value="">Tüm marketler</option></select>
+    <select id="lesson-strategy" class="input"><option value="">Tüm stratejiler</option></select>
+    <select id="lesson-severity" class="input"><option value="">Tüm severity</option>
+      <option value="critical">critical</option>
+      <option value="high">high</option>
+      <option value="medium">medium</option>
+      <option value="info">info</option>
+    </select>
+  </div>
+
+  <div class="card no-pad">
+    <div id="lessons-table" class="table-wrap"></div>
+  </div>
+</section>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

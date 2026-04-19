@@ -16,12 +16,12 @@ import pandas as pd
 from datetime import datetime, timezone
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/Users/ibrahimpeyman/Documents/oto-bot/src')
+sys.path.insert(0, 'C:/Users/koray/projeler/oto-bot/src')
 
 import ta
 
 # ── Load cached data ────────────────────────────────────
-CACHE_FILE = '/Users/ibrahimpeyman/Documents/oto-bot/artifacts/data_cache.pkl'
+CACHE_FILE = 'C:/Users/koray/projeler/oto-bot/artifacts/data_cache.pkl'
 with open(CACHE_FILE, 'rb') as f:
     all_data = pickle.load(f)
 print(f"Loaded {len(all_data)} coins from cache")
@@ -407,7 +407,7 @@ for name, func in SIGNAL_TESTS:
 
 
 # Save
-with open('/Users/ibrahimpeyman/Documents/oto-bot/artifacts/edge_search_results.json', 'w') as f:
+with open('C:/Users/koray/projeler/oto-bot/artifacts/edge_search_results.json', 'w') as f:
     json.dump({'best_results': best_results, 'note': 'Edge = expected ATR move - cost ATR'},
               f, indent=2, default=str)
 

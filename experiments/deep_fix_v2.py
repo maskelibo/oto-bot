@@ -8,7 +8,7 @@ import pandas as pd
 from datetime import datetime, timezone
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/Users/ibrahimpeyman/Documents/oto-bot/src')
+sys.path.insert(0, 'C:/Users/koray/projeler/oto-bot/src')
 
 import ta
 from oto_bot.data.crypto import CryptoDataProvider
@@ -26,7 +26,7 @@ MAX_POSITIONS = 6
 DAILY_LOSS_CAP = 300.0
 INITIAL_CAPITAL = 10000.0
 
-CACHE_FILE = '/Users/ibrahimpeyman/Documents/oto-bot/artifacts/data_cache.pkl'
+CACHE_FILE = 'C:/Users/koray/projeler/oto-bot/artifacts/data_cache.pkl'
 
 # ── Fetch data with caching ────────────────────────────
 provider = CryptoDataProvider()
@@ -691,7 +691,7 @@ def make_serializable(obj):
         return bool(obj)
     return obj
 
-with open('/Users/ibrahimpeyman/Documents/oto-bot/artifacts/v3_adaptive_results.json', 'w') as f:
+with open('C:/Users/koray/projeler/oto-bot/artifacts/v3_adaptive_results.json', 'w') as f:
     json.dump(make_serializable(all_results), f, indent=2, default=str)
 
 print("\nResults saved to artifacts/v3_adaptive_results.json")

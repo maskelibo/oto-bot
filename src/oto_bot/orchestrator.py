@@ -23,6 +23,16 @@ from oto_bot.core.models import Hypothesis, ExperimentResult
 from oto_bot.experiments.ledger import ExperimentLedger
 from oto_bot.governance.risk import RiskGate
 from oto_bot.memory.manager import MemoryManager
+from oto_bot.memory.journal import LearningJournal
+from oto_bot.memory.retriever import MemoryRetriever, RetrievalContext
+from oto_bot.memory.insight import InsightExtractor
+from oto_bot.memory.curve import LearningCurve
+from oto_bot.agents.hr import HRManager
+from oto_bot.agents.robustness import RobustnessQueue, generate_variants, is_promising
+from oto_bot.agents.stress import StressLab
+from oto_bot.agents.auto_approver import AutoApprover
+from oto_bot.agents.regime import RegimeOracle
+from oto_bot.agents.macro import MercuryMacro
 from oto_bot.strategies.base import StrategyContext, Strategy
 from oto_bot.strategies.day_trader import DayTraderStrategy
 from oto_bot.strategies.swing_trader import SwingTraderStrategy
@@ -179,6 +189,30 @@ class Orchestrator:
         self.ledger = ExperimentLedger()
         self.risk_gate = RiskGate()
 
+        # Compact memory stack: journal + retriever + insight extractor
+        self.journal = LearningJournal()
+        self.retriever = MemoryRetriever(journal=self.journal)
+        self.insight = InsightExtractor(journal=self.journal)
+        self.learning_curve = LearningCurve()
+
+        # HR — CEO'nun elinde otomatik hiring/firing
+        self.hr = HRManager(registry=self.registry, journal=self.journal)
+        self._hr_review_interval = 50  # her 50 cycle'da bir review
+
+        # Robustness queue — promising sonuçların varyantları
+        self.robustness_queue = RobustnessQueue()
+
+        # Stress Lab — promote adayları için
+        self.stress_lab = StressLab()
+
+        # Auto-approver (settings.auto_approve=True ise proposal'ları otomatik karara bağlar)
+        self.auto_approver = AutoApprover()
+        self._auto_approve_interval = 10  # her 10 cycle'da bir tetikle
+
+        # Regime + Macro overlay (audit'ten sonra etkinleştirildi — önceden dead code idi)
+        self.regime_oracle = RegimeOracle()
+        self.macro = MercuryMacro()
+
         # Portfolio state
         self.portfolio = PortfolioState(
             initial_capital=initial_capital,
@@ -201,6 +235,73 @@ class Orchestrator:
         self._base_pause: float = cycle_pause_seconds
         self._min_pause: float = max(0.5, cycle_pause_seconds * 0.25)
         self._max_pause: float = cycle_pause_seconds * 3.0
+
+        # Heartbeat (live status for dashboard)
+        self._heartbeat_path = Path("artifacts/current_cycle.json")
+        self._heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+        self._current_hypothesis: dict[str, Any] = {}
+
+    # ------------------------------------------------------------------
+    # Heartbeat: which agent is doing what, right now
+    # ------------------------------------------------------------------
+
+    PHASE_AGENTS: dict[str, list[str]] = {
+        "idle": [],
+        "select": ["Vega MarketIntel", "Regime Oracle"],
+        "hypothesize": ["Nova StrategyRND", "Atlas CEO"],
+        "fetch_data": ["Helix Backtest", "Archive Memory"],
+        "backtest": ["Helix Backtest"],
+        "risk_gate": ["Sentinel Risk"],
+        "portfolio_limits": ["Apex PortfolioRisk"],
+        "score": ["Pulse Analytics"],
+        "debate": [
+            "Sentinel Risk", "Sigma Quant", "Nova StrategyRND", "Pulse Analytics",
+            "Mercury Macro", "Apex PortfolioRisk", "Tariq TCA", "Cassandra PreMortem",
+        ],
+        "ceo_decision": ["Atlas CEO"],
+        "persist": ["Archive Memory"],
+    }
+
+    PHASE_LABELS: dict[str, str] = {
+        "idle":             "Boşta",
+        "select":           "Hedef seçiliyor",
+        "hypothesize":      "Hipotez oluşturuluyor",
+        "fetch_data":       "Veri çekiliyor",
+        "backtest":         "Backtest koşuyor",
+        "risk_gate":        "Risk gate kontrolü",
+        "portfolio_limits": "Kitap limitleri kontrol",
+        "score":            "Risk-adjusted skor",
+        "debate":           "8-sesli panel tartışıyor",
+        "ceo_decision":     "CEO karar veriyor",
+        "persist":          "Hafızaya yazılıyor",
+    }
+
+    def _heartbeat(
+        self,
+        phase: str,
+        hypothesis: dict[str, Any] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Write a lightweight status file for the dashboard."""
+        if hypothesis is not None:
+            self._current_hypothesis = hypothesis
+        payload = {
+            "cycle": self.total_cycles + (1 if phase not in ("idle", "persist") else 0),
+            "phase": phase,
+            "phase_label": self.PHASE_LABELS.get(phase, phase),
+            "active_agents": self.PHASE_AGENTS.get(phase, []),
+            "hypothesis": self._current_hypothesis,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if extra:
+            payload.update(extra)
+        try:
+            self._heartbeat_path.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass  # heartbeat kırılsa bile cycle devam eder
 
         # Logging
         self._setup_logging()
@@ -263,8 +364,26 @@ class Orchestrator:
         return f"{strat}|{json.dumps(simplified, sort_keys=True)}"
 
     def _pick_next_experiment(self) -> dict[str, Any]:
-        """Smart experiment picker — session-aware, avoids repeating failures,
-        favours untested combos and variations of top performers."""
+        """Smart experiment picker — robustness suite queue → untested → variants → random."""
+
+        # 0. Önce robustness kuyruğundan çek (varsa)
+        pending = self.robustness_queue.next_pending()
+        if pending is not None:
+            logger.info(
+                f"Robustness: next variant from queue → {pending.strategy}/{pending.market}/"
+                f"{pending.symbol}/{pending.timeframe} (origin={pending.origin_title[:40]}, "
+                f"window={pending.data_window_years or 'default'})"
+            )
+            return {
+                "market": pending.market,
+                "strategy": pending.strategy,
+                "symbol": pending.symbol,
+                "timeframe": pending.timeframe,
+                "params": pending.params,
+                "session": self._session_context(),
+                "robustness_origin": pending.origin_experiment_id,
+                "data_window_years": pending.data_window_years,
+            }
 
         session = self._session_context()
         preferred_markets = session["preferred_markets"]
@@ -473,6 +592,7 @@ class Orchestrator:
 
     def run_single_cycle(self, experiment: dict[str, Any] | None = None) -> CycleResult:
         """Execute one full research cycle."""
+        self._heartbeat("select")
         if experiment is None:
             experiment = self._pick_next_experiment()
 
@@ -482,6 +602,31 @@ class Orchestrator:
         timeframe = experiment["timeframe"]
         params = experiment.get("params", {})
         session = experiment.get("session", self._session_context())
+
+        # Heartbeat: publish the current target
+        self._heartbeat("hypothesize", hypothesis={
+            "market": market, "strategy": strat,
+            "symbol": symbol, "timeframe": timeframe,
+            "title": f"{strat}_{market}_{symbol}_{timeframe}_v{self.total_cycles}",
+            "session": session.get("session", "?"),
+        })
+
+        # Memory retrieval — bu cycle için ilgili geçmiş dersleri yükle
+        try:
+            ctx = RetrievalContext(
+                market=market,
+                strategy_family=strat,
+                symbol=symbol,
+                regime="*",  # rejim henüz ölçülmedi; global dersler de gelecek
+                include_global=True,
+            )
+            retrieved = self.retriever.retrieve(ctx, k=5)
+            if retrieved:
+                logger.info(
+                    f"Memory: retrieved {len(retrieved)} lessons for {strat}/{market}/{symbol}"
+                )
+        except Exception as _e:
+            logger.warning(f"retrieval failed: {_e}")
 
         logger.info(
             f"CYCLE {self.total_cycles + 1}: {strat}/{market}/{symbol}/{timeframe} "
@@ -508,7 +653,39 @@ class Orchestrator:
             context.params = params
 
         # 3. Get data — try real data, fall back to synthetic
-        data = self._fetch_data(market, symbol, timeframe)
+        self._heartbeat("fetch_data")
+        window_years = experiment.get("data_window_years")
+        data = self._fetch_data(market, symbol, timeframe, window_years=window_years)
+
+        # 3b. Regime classify + Macro overlay — audit sonrası etkinleştirildi
+        regime_state = None
+        macro_context = None
+        try:
+            regime_state = self.regime_oracle.classify(data, market=market)
+            # Strateji-rejim fit kontrolü: mismatch ise cycle yine koşar ama not düşer
+            fit = self.regime_oracle.strategy_fit(regime_state.regime, strat)
+            if not fit["fit"] and regime_state.regime != "unknown":
+                logger.info(
+                    f"Regime mismatch: {strat} için {regime_state.regime} uygun değil "
+                    f"(rec: {fit['recommendation']})"
+                )
+        except Exception as _e:
+            logger.warning(f"regime classify failed: {_e}")
+
+        try:
+            # Macro: BTC + companion (mümkünse ETH) ile
+            companion = {}
+            if market == "crypto" and symbol != "ETHUSDT":
+                try:
+                    eth = self._fetch_data("crypto", "ETHUSDT", timeframe)
+                    companion["ETH"] = eth
+                except Exception:
+                    pass
+            macro_context = self.macro.assess(market, data, companion_ohlcv=companion)
+            if macro_context.bias == "crisis":
+                logger.warning(f"Macro CRISIS detected — promotion will be frozen.")
+        except Exception as _e:
+            logger.warning(f"macro assess failed: {_e}")
 
         # 4. Create hypothesis
         ceo_profile = self.registry.find_by_name("Atlas CEO")
@@ -525,15 +702,78 @@ class Orchestrator:
         self.memory.save_hypothesis(hypothesis)
 
         # 5. Run backtest
+        self._heartbeat("backtest")
         engine = BacktestEngine()
         result = engine.run(strategy_impl, data, context)
 
+        # 5b. Monte Carlo DD — ucuz, her cycle'da koşar
+        try:
+            # Equity curve'ü backtest'ten sonra rebuild et (trade return'lerle)
+            import numpy as _np
+            synth_eq = [10000.0]
+            for t_pct in getattr(result, "top_trades_by_pnl", []):
+                # Bu liste sadece top 5 içerir; daha iyi: mevcut metriklerden rebuild
+                pass
+            # Basit: result.max_drawdown'dan faydalanarak MC yerine risk-adjusted proxy
+            # Gerçek equity curve'e erişim için engine içinde tutulmalı — şimdilik
+            # trade return percentages'dan sentetik eğri üretelim:
+            avg_w = float(getattr(result, "avg_win_pct", 0) or 0)
+            avg_l = float(getattr(result, "avg_loss_pct", 0) or 0)
+            wr = float(result.win_rate or 0)
+            n_trades = int(result.total_trades or 0)
+            if n_trades >= 10 and (avg_w != 0 or avg_l != 0):
+                rng = _np.random.default_rng(42)
+                # N simulation paths
+                worst = []
+                for _ in range(500):
+                    rets = rng.choice([avg_w, avg_l], size=n_trades, p=[wr, 1 - wr])
+                    eq = _np.cumprod(1 + rets)
+                    peak = _np.maximum.accumulate(eq)
+                    dd = (eq / peak - 1.0).min()
+                    worst.append(float(dd))
+                result.montecarlo_95_drawdown = float(_np.percentile(worst, 5))
+        except Exception as _e:
+            logger.warning(f"monte_carlo failed: {_e}")
+
+        # 5c. Walk-forward — sadece promising (Sharpe >= 1.0) için
+        if result.sharpe >= 1.0 and len(data) >= 200:
+            try:
+                self._heartbeat("backtest")
+                wf_sharpe = engine.walk_forward(strategy_impl, data, context, n_splits=3)
+                result.walkforward_sharpe = float(wf_sharpe)
+            except Exception as _e:
+                logger.warning(f"walk_forward failed: {_e}")
+
+        # 5d. Stress Lab — sadece promote adayları için (Sharpe >= 1.2 AND DD >= -12%)
+        stress_pass_count = 0
+        stress_total = 0
+        stress_results = []
+        if result.sharpe >= 1.2 and result.max_drawdown >= -0.12 and result.total_trades >= 30:
+            try:
+                def _stress_bt(shocked_df):
+                    _r = engine.run(strategy_impl, shocked_df, context)
+                    return {
+                        "max_drawdown": _r.max_drawdown,
+                        "total_pnl": _r.roi * 10000,
+                        "kill_switch_fired": _r.max_drawdown < -0.25,
+                    }
+                stress_results = self.stress_lab.run_all(data, strat, market, _stress_bt)
+                stress_pass_count = sum(1 for s in stress_results if s.survived)
+                stress_total = len(stress_results)
+                # Stress override: min 4/6 must survive to stay promote-eligible
+                if stress_pass_count < 4:
+                    result.promoted = False
+            except Exception as _e:
+                logger.warning(f"stress_lab failed: {_e}")
+
         # 6. Risk gate
+        self._heartbeat("risk_gate")
         risk_report = self.risk_gate.approve(result)
         risk_approved = risk_report.approved
         risk_reason = risk_report.summary
 
         # 6b. Check multi-timeframe portfolio limits before promotion
+        self._heartbeat("portfolio_limits")
         monthly_dd = self.portfolio.monthly_pnl / self.portfolio.total_capital if self.portfolio.total_capital > 0 else 0.0
         daily_frac = self.portfolio.daily_pnl / self.portfolio.total_capital if self.portfolio.total_capital > 0 else 0.0
         weekly_frac = self.portfolio.weekly_pnl / self.portfolio.total_capital if self.portfolio.total_capital > 0 else 0.0
@@ -551,34 +791,81 @@ class Orchestrator:
         result.promoted = result.promoted and risk_approved
 
         # 7. Score
+        self._heartbeat("score")
         score = composite_score(result)
+        stress_str = (
+            f"stress={stress_pass_count}/{stress_total}" if stress_total > 0 else "stress=skipped"
+        )
+        wf_str = f"wf_sharpe={result.walkforward_sharpe:.2f}" if result.walkforward_sharpe is not None else "wf=n/a"
+        mc_str = f"mc_dd={result.montecarlo_95_drawdown:.2%}" if result.montecarlo_95_drawdown is not None else "mc=n/a"
         result.notes = (
             f"{result.notes}; risk_gate={risk_reason}; "
             f"composite_score={score:.4f}; session={session.get('session', '?')}; "
+            f"{wf_str}; {mc_str}; {stress_str}; "
             f"params={json.dumps(params)}"
         )
 
         # 8. Memory
         self.memory.save_result(result)
 
-        # 9. CEO review
-        decision_obj = self.ceo.review_experiment(result)
+        # 9. CEO review (this internally triggers debate + pre-mortem)
+        self._heartbeat("debate")
+        # Regime + Macro bağlamını CEO'ya geç (audit sonrası aktif)
+        macro_ctx_dict = None
+        if macro_context is not None:
+            macro_ctx_dict = {
+                "bias": macro_context.bias,
+                "risk_on_score": macro_context.risk_on_score,
+                "regime_label": macro_context.regime_label,
+                "confidence": macro_context.confidence,
+            }
+        # CEO'ya rejim bilgisini result üzerinden de taşı
+        if regime_state is not None and regime_state.regime != "unknown":
+            # Engine'in _detect_regime'si zayıf bir proxy; Oracle daha doğru
+            result.regime = regime_state.regime
+        decision_obj = self.ceo.review_experiment(result, macro_context=macro_ctx_dict)
+        self._heartbeat("ceo_decision")
         self.memory.save_decision(decision_obj)
 
-        # 10. Debate (if available)
-        debate_summary = None
+        # 9b. Insight extraction — cycle'dan kompakt dersler çıkar ve journal'a yaz
         try:
-            from oto_bot.agents.debate import AgentDebater
-            debater = AgentDebater()
-            debate = debater.debate(
-                topic=f"Should we promote {hypothesis.title}?",
-                experiment_result=result,
-                participants=["Sentinel Risk", "Sigma Quant", "Nova StrategyRND", "Pulse Analytics", "Atlas CEO"],
-                memory_manager=self.memory,
+            self._heartbeat("persist")
+            self.insight.extract_from_cycle(
+                result=result,
+                decision={"decision": decision_obj.decision, "reasoning": decision_obj.reasoning},
+                debate_conclusion=None,
+                cycle_number=self.total_cycles + 1,
             )
-            debate_summary = debate.conclusion
-        except (ImportError, Exception) as e:
-            logger.warning(f"Debate skipped: {e}")
+        except Exception as _e:
+            logger.warning(f"insight extraction failed: {_e}")
+
+        # 9c. Auto-schedule robustness suite — promising sonuç için varyantlar
+        try:
+            result_dict = {
+                "experiment_id": result.experiment_id,
+                "hypothesis_title": result.hypothesis_title,
+                "market": result.market,
+                "strategy_family": result.strategy_family,
+                "symbol": getattr(result, "symbol", symbol),
+                "bar_timeframe": getattr(result, "bar_timeframe", timeframe),
+                "strategy_params": getattr(result, "strategy_params", params) or params,
+                "sharpe": result.sharpe, "cagr": result.cagr,
+                "profit_factor": result.profit_factor,
+                "max_drawdown": result.max_drawdown,
+                "total_trades": result.total_trades,
+            }
+            # Only schedule if promising AND not already a robustness test itself
+            if is_promising(result_dict) and "robustness_origin" not in experiment:
+                variants = generate_variants(result_dict, max_variants=8, reason="auto_promising")
+                n = self.robustness_queue.push_many(variants)
+                if n > 0:
+                    logger.info(f"Robustness: auto-scheduled {n} variants for {result.hypothesis_title}")
+        except Exception as _e:
+            logger.warning(f"robustness scheduling failed: {_e}")
+
+        # 10. Debate — ARTIK CEO.review_experiment ici çağırıyor, duplicate yok.
+        # (Daha önce orchestrator burada ikinci bir debate koşuyordu; audit kaldırdı.)
+        debate_summary = decision_obj.reasoning if decision_obj else None
 
         # 11. Log to ledger
         self.ledger.log({
@@ -638,20 +925,118 @@ class Orchestrator:
 
         return cycle_result
 
-    def _fetch_data(self, market: str, symbol: str, timeframe: str):
-        """Try real data providers, fall back to synthetic."""
+    # Timeframe → bar limit (minimum anlamlı backtest penceresi)
+    TIMEFRAME_BAR_LIMITS: dict[str, int] = {
+        "5m":  2000,   # ~7 gün (exploratory scalper)
+        "15m": 3000,   # ~31 gün (~1 ay)
+        "30m": 4000,   # ~2.8 ay
+        "1h":  8760,   # 1 yıl
+        "4h":  4380,   # 2 yıl
+        "1d":  1460,   # 4 yıl
+    }
+    _DEFAULT_BAR_LIMIT: int = 500
+
+    def _fetch_data(self, market: str, symbol: str, timeframe: str, window_years: float | None = None):
+        """Öncelikle 5 yıl'lık cached data'dan al; cache yoksa live fetch; son çare sentetik.
+
+        Data cache: artifacts/data_cache/<market>/<symbol>_<tf>.parquet
+        Orchestrator başlatıldığında backfill script ile doldurulur:
+            .venv/Scripts/python.exe scripts/backfill_data.py
+        """
+        tf_key = timeframe.lower() if timeframe else "1h"
+        base_limit = self.TIMEFRAME_BAR_LIMITS.get(tf_key, self._DEFAULT_BAR_LIMIT)
+
+        # Eğer window_years belirtilmişse, limit'i ona göre ayarla
+        if window_years is not None and window_years > 0:
+            mins = self._tf_to_minutes(tf_key)
+            want_bars = int(window_years * 365 * 24 * 60 / mins)
+            limit = min(want_bars, base_limit * 10)  # aşırı büyüme koru
+        else:
+            limit = base_limit
+
+        # 1. Önce 5-yıl cache'inden dene
+        try:
+            from oto_bot.data.downloader import download
+            cached = download(market, symbol, timeframe, years=5.0, use_cache=True)
+            if cached is not None and len(cached) >= 200:
+                # Cache max'i al veya limit'e göre kes
+                df = cached.tail(limit).reset_index(drop=True) if len(cached) > limit else cached.reset_index(drop=True)
+                logger.info(
+                    f"Cache data: {symbol} {timeframe} ({len(df)} bars "
+                    f"≈ {len(df) * self._tf_to_minutes(tf_key) / 60 / 24:.1f} gün)"
+                )
+                return df
+        except Exception as e:
+            logger.warning(f"Cache fetch failed for {symbol}: {e}")
+
+        # 2. Live fetch (eski davranış — kısa pencere)
         try:
             from oto_bot.data.factory import DataProviderFactory
             provider = DataProviderFactory.get_provider(market)
-            data = provider.fetch_ohlcv(symbol, timeframe, limit=500)
-            if data is not None and len(data) >= 100:
-                logger.info(f"Real data fetched: {symbol} {timeframe} ({len(data)} bars)")
+            data = provider.fetch_ohlcv(symbol, timeframe, limit=limit)
+            if data is not None and len(data) >= 200:
+                logger.info(
+                    f"Live data fetched: {symbol} {timeframe} ({len(data)} bars "
+                    f"≈ {len(data) * self._tf_to_minutes(tf_key) / 60 / 24:.1f} gün)"
+                )
                 return data
         except Exception as e:
-            logger.warning(f"Real data unavailable for {symbol}: {e}")
+            logger.warning(f"Live data unavailable for {symbol}: {e}")
 
-        logger.info(f"Using synthetic data for {symbol}")
-        return make_synthetic_ohlc(500)
+        logger.info(f"Using synthetic data for {symbol} ({limit} bars)")
+        return make_synthetic_ohlc(limit)
+
+    @staticmethod
+    def _tf_to_minutes(tf: str) -> int:
+        return {
+            "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+            "1h": 60, "2h": 120, "4h": 240, "1d": 1440,
+        }.get(tf, 60)
+
+    def _prune_failed_bots(
+        self,
+        min_avg_sharpe: float = 0.0,
+        min_avg_roi: float = -0.05,
+        min_runs: int = 2,
+    ) -> int:
+        """Başarısız botların tüm deneylerini sil. Memory store üzerinde çalışır."""
+        import sqlite3
+        try:
+            conn = self.memory.store._conn
+            rows = conn.execute("SELECT id, data FROM experiments").fetchall()
+        except Exception:
+            return 0
+        from collections import defaultdict
+        by_bot: dict[str, list] = defaultdict(list)
+        for r in rows:
+            try:
+                d = json.loads(r["data"]) if isinstance(r["data"], str) else r["data"]
+                inner = d.get("result") if isinstance(d.get("result"), dict) else d
+            except Exception:
+                continue
+            fam = inner.get("strategy_family") or d.get("strategy") or ""
+            params = inner.get("strategy_params") or d.get("params") or {}
+            # Basit fingerprint — server'daki ile aynı olacak şekilde deterministik
+            import hashlib
+            payload = f"{fam}|" + "|".join(f"{k}={params[k]}" for k in sorted(params.keys()))
+            bid = hashlib.md5(payload.encode("utf-8")).hexdigest()[:10]
+            by_bot[bid].append((r["id"], inner))
+
+        ids_to_delete: list[str] = []
+        for bid, runs in by_bot.items():
+            if len(runs) < min_runs:
+                continue
+            avg_s = sum((r[1].get("sharpe") or 0) for r in runs) / len(runs)
+            avg_r = sum((r[1].get("roi") or 0) for r in runs) / len(runs)
+            if avg_s < min_avg_sharpe and avg_r < min_avg_roi:
+                ids_to_delete.extend([r[0] for r in runs])
+
+        if not ids_to_delete:
+            return 0
+        placeholders = ",".join("?" for _ in ids_to_delete)
+        conn.execute(f"DELETE FROM experiments WHERE id IN ({placeholders})", ids_to_delete)
+        conn.commit()
+        return len(ids_to_delete)
 
     # ------------------------------------------------------------------
     # Autonomous loop
@@ -676,10 +1061,45 @@ class Orchestrator:
 
                 cycle_result = self.run_single_cycle()
                 self._print_cycle_summary(cycle_result)
+                self._check_winner(cycle_result)
 
                 # Every 10 cycles, print executive brief
                 if self.total_cycles % 10 == 0:
                     self._print_executive_brief()
+
+                # Her 200 cycle'da failed-bot prune
+                if self.total_cycles > 0 and self.total_cycles % 200 == 0:
+                    try:
+                        n = self._prune_failed_bots()
+                        if n > 0:
+                            console.print(f"[bold red]🗑️ Auto-prune:[/bold red] {n} başarısız bot deneyi silindi")
+                    except Exception as _e:
+                        logger.warning(f"prune failed: {_e}")
+
+                # Auto-approve check her 10 cycle (dakika mertebesi)
+                if self.total_cycles > 0 and self.total_cycles % self._auto_approve_interval == 0:
+                    try:
+                        aa_report = self.auto_approver.run()
+                        if aa_report.get("approved") or aa_report.get("rejected"):
+                            console.print(
+                                f"[bold yellow]🤖 AutoApprover:[/bold yellow] "
+                                f"approved {aa_report['approved']}, rejected {aa_report['rejected']}"
+                            )
+                    except Exception as _e:
+                        logger.warning(f"auto-approver failed: {_e}")
+
+                # HR review her N cycle'da bir
+                if self.total_cycles > 0 and self.total_cycles % self._hr_review_interval == 0:
+                    try:
+                        review = self.hr.review(cycle_number=self.total_cycles)
+                        if review.get("applied"):
+                            console.print(
+                                f"[bold cyan]👑 HR review (cycle {self.total_cycles}):[/bold cyan] "
+                                f"{len(review['applied'])} change(s): "
+                                + ", ".join(f"{a['action']} {a['agent']}" for a in review["applied"])
+                            )
+                    except Exception as _e:
+                        logger.warning(f"HR review failed: {_e}")
 
                 # Adaptive pause
                 pause = self._adaptive_pause()
@@ -689,6 +1109,59 @@ class Orchestrator:
             console.print("\n[bold yellow]Autonomous mode stopped by user.[/bold yellow]")
 
         self._print_final_report()
+
+    # ------------------------------------------------------------------
+    # Winner detection
+    # ------------------------------------------------------------------
+
+    # Hedef: yıllık >=60% CAGR + Sharpe >=1.5 + DD >=-15% + >=100 trade + promoted
+    WINNER_CAGR_MIN: float = 0.60
+    WINNER_SHARPE_MIN: float = 1.5
+    WINNER_MAX_DD_MIN: float = -0.15
+    WINNER_TRADES_MIN: int = 100
+
+    def _check_winner(self, cr: "CycleResult") -> None:
+        r = cr.result
+        if not r.promoted:
+            return
+        if (
+            r.cagr >= self.WINNER_CAGR_MIN
+            and r.sharpe >= self.WINNER_SHARPE_MIN
+            and r.max_drawdown >= self.WINNER_MAX_DD_MIN
+            and r.total_trades >= self.WINNER_TRADES_MIN
+        ):
+            banner = (
+                "\n"
+                + "*" * 78 + "\n"
+                + f"*** WINNER FOUND — cycle {self.total_cycles} ***\n"
+                + f"*** {cr.hypothesis.title}\n"
+                + f"*** CAGR={r.cagr:.1%} Sharpe={r.sharpe:.2f} "
+                  f"DD={r.max_drawdown:.1%} trades={r.total_trades} WR={r.win_rate:.1%}\n"
+                + "*" * 78 + "\n"
+            )
+            console.print(f"[bold green]{banner}[/bold green]")
+
+            import json as _json
+            winners_file = Path("artifacts/winners.jsonl")
+            winners_file.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "cycle": self.total_cycles,
+                "title": cr.hypothesis.title,
+                "market": cr.hypothesis.market,
+                "strategy_family": cr.hypothesis.strategy_family,
+                "timeframe": cr.hypothesis.timeframe,
+                "cagr": r.cagr,
+                "sharpe": r.sharpe,
+                "max_drawdown": r.max_drawdown,
+                "profit_factor": r.profit_factor,
+                "total_trades": r.total_trades,
+                "win_rate": r.win_rate,
+                "stability_score": r.stability_score,
+                "experiment_id": r.experiment_id,
+                "discovered_at": _now().isoformat(),
+            }
+            with open(winners_file, "a", encoding="utf-8") as fh:
+                fh.write(_json.dumps(payload) + "\n")
 
     # ------------------------------------------------------------------
     # Reporting

@@ -98,5 +98,165 @@
     "agent_id": "a5314a58-198d-4516-9123-c0fba934954d",
     "created_at": "2026-04-12T16:34:58.919990+00:00",
     "metadata": {}
+  },
+  {
+    "name": "Mercury Macro",
+    "role": "Macro Strategist",
+    "department": "Research",
+    "mandate": "Cross-asset overlay: risk-on/off, dominance, macro bias.",
+    "active": true,
+    "agent_id": "10ade6c5-a58c-4a22-bcad-d8f676ebd0e9",
+    "created_at": "2026-04-18T19:22:53.835125+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Regime Oracle",
+    "role": "Regime Classifier",
+    "department": "Research",
+    "mandate": "Classify market regimes per instrument.",
+    "active": true,
+    "agent_id": "b351490b-4a44-4672-a3ff-07d74abcfa2e",
+    "created_at": "2026-04-18T19:22:53.836126+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Shockwave StressLab",
+    "role": "Stress Lab",
+    "department": "Simulation",
+    "mandate": "Run named stress scenarios against promotion candidates.",
+    "active": true,
+    "agent_id": "e3e77344-10cd-4359-97f1-318fefe4fc61",
+    "created_at": "2026-04-18T19:22:53.836126+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Apex PortfolioRisk",
+    "role": "Portfolio Risk",
+    "department": "Governance",
+    "mandate": "Independent book-level risk; VaR/ES/correlation; veto authority.",
+    "active": true,
+    "agent_id": "3bc3f8fa-4f2f-4efb-a66d-a83a42358faa",
+    "created_at": "2026-04-18T19:22:53.837125+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Cassandra PreMortem",
+    "role": "Pre-Mortem Analyst",
+    "department": "Governance",
+    "mandate": "Systematic failure-mode scan before promotion.",
+    "active": true,
+    "agent_id": "6427de58-4443-443a-8ec9-7e7c291ea5ad",
+    "created_at": "2026-04-18T19:22:53.837125+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Tariq TCA",
+    "role": "Execution QA",
+    "department": "Execution",
+    "mandate": "Transaction cost analysis; slippage/impact/latency measurement.",
+    "active": true,
+    "agent_id": "08555ca3-f31e-43a4-8e0e-1f053d7221e0",
+    "created_at": "2026-04-18T19:22:53.838124+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Ledger Allocator",
+    "role": "Capital Allocator",
+    "department": "Execution",
+    "mandate": "Pod capital allocation, rebalance, auto stop-out.",
+    "active": true,
+    "agent_id": "b080c86f-72fe-4443-ba11-be1cc99a6c46",
+    "created_at": "2026-04-18T19:22:53.838124+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Ledger Attribution",
+    "role": "PnL Attribution",
+    "department": "Analytics",
+    "mandate": "Decompose PnL by signal, symbol, regime, hour.",
+    "active": true,
+    "agent_id": "10002fe7-9ea6-4b6d-8e11-2a92070a0397",
+    "created_at": "2026-04-18T19:22:53.839126+00:00",
+    "metadata": {}
+  },
+  {
+    "name": "Nova-day-us_equities",
+    "role": "Strategy R&D Specialist",
+    "department": "Research",
+    "mandate": "Scope: day / us_equities. Failure rate 93% over 54 cycles. Focus: izole edilmi\u015f hipotezler, specialized param searches.",
+    "active": false,
+    "agent_id": "c8fb85e0-494f-4c14-b4f3-4c75726f9a36",
+    "created_at": "2026-04-18T21:36:09.018838+00:00",
+    "metadata": {
+      "hired_at_cycle": 150,
+      "hired_by": "Atlas CEO",
+      "scope": "day|us_equities",
+      "failure_rate": 0.926,
+      "sample": 54
+    }
+  },
+  {
+    "name": "Nova-unknown-crypto",
+    "role": "Strategy R&D Specialist",
+    "department": "Research",
+    "mandate": "Scope: unknown / crypto. Failure rate 100% over 58 cycles. Focus: izole edilmi\u015f hipotezler, specialized param searches.",
+    "active": false,
+    "agent_id": "3b93a406-51ba-48c5-a74f-831700604fd3",
+    "created_at": "2026-04-18T22:09:13.335965+00:00",
+    "metadata": {
+      "hired_at_cycle": 200,
+      "hired_by": "Atlas CEO",
+      "scope": "unknown|crypto",
+      "failure_rate": 1.0,
+      "sample": 58
+    }
+  },
+  {
+    "name": "Nova-day-crypto",
+    "role": "Strategy R&D Specialist",
+    "department": "Research",
+    "mandate": "Scope: day / crypto. Failure rate 90% over 62 cycles. Focus: izole edilmi\u015f hipotezler, specialized param searches.",
+    "active": false,
+    "agent_id": "a91abc4a-4bb2-4c55-91f8-f5658297ac05",
+    "created_at": "2026-04-18T22:09:13.338964+00:00",
+    "metadata": {
+      "hired_at_cycle": 200,
+      "hired_by": "Atlas CEO",
+      "scope": "day|crypto",
+      "failure_rate": 0.903,
+      "sample": 62
+    }
+  },
+  {
+    "name": "Nova-swing-us_equities",
+    "role": "Strategy R&D Specialist",
+    "department": "Research",
+    "mandate": "Scope: swing / us_equities. Failure rate 73% over 52 cycles. Focus: izole edilmi\u015f hipotezler, specialized param searches.",
+    "active": false,
+    "agent_id": "fe5ae285-b7a7-4d58-91df-8314756d0f33",
+    "created_at": "2026-04-18T23:53:41.921225+00:00",
+    "metadata": {
+      "hired_at_cycle": 200,
+      "hired_by": "Atlas CEO",
+      "scope": "swing|us_equities",
+      "failure_rate": 0.731,
+      "sample": 52
+    }
+  },
+  {
+    "name": "Nova-unknown-us_equities",
+    "role": "Strategy R&D Specialist",
+    "department": "Research",
+    "mandate": "Scope: unknown / us_equities. Failure rate 100% over 53 cycles. Focus: izole edilmi\u015f hipotezler, specialized param searches.",
+    "active": false,
+    "agent_id": "de447797-ffcc-41c0-b4ce-022514d44985",
+    "created_at": "2026-04-19T00:02:57.522659+00:00",
+    "metadata": {
+      "hired_at_cycle": 400,
+      "hired_by": "Atlas CEO",
+      "scope": "unknown|us_equities",
+      "failure_rate": 1.0,
+      "sample": 53
+    }
   }
 ]

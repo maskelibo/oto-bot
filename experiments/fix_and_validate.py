@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from itertools import product
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/Users/ibrahimpeyman/Documents/oto-bot/src')
+sys.path.insert(0, 'C:/Users/koray/projeler/oto-bot/src')
 
 from oto_bot.data.crypto import CryptoDataProvider
 from oto_bot.strategies.base import StrategyContext
@@ -281,7 +281,7 @@ def print_results(label, results):
 strategy = ScalperV2Strategy()
 
 # Current params
-CURRENT_PARAMS = json.load(open('/Users/ibrahimpeyman/Documents/oto-bot/artifacts/v5_regime_fix.json'))['params']
+CURRENT_PARAMS = json.load(open('C:/Users/koray/projeler/oto-bot/artifacts/v5_regime_fix.json'))['params']
 
 # Parameter grid to test
 # Key insight: we need to FIX the R:R ratio
@@ -408,7 +408,7 @@ def make_serializable(obj):
         return bool(obj)
     return obj
 
-with open('/Users/ibrahimpeyman/Documents/oto-bot/artifacts/fix_comparison.json', 'w') as f:
+with open('C:/Users/koray/projeler/oto-bot/artifacts/fix_comparison.json', 'w') as f:
     json.dump(make_serializable(all_results), f, indent=2, default=str)
 
 print("\nResults saved to artifacts/fix_comparison.json")
